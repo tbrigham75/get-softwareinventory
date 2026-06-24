@@ -15,6 +15,8 @@
     Return inventory objects to the pipeline instead of (or in addition to) saving files.
 .PARAMETER ExportCsv
     Export software and updates to CSV files alongside HTML reports.
+.PARAMETER ThrottleLimit
+    Maximum number of concurrent remote host collections (default: 5, max: 50).
 .EXAMPLE
     .\Get-SoftwareInventory.ps1
 .EXAMPLE
@@ -31,7 +33,9 @@ param(
     [string]$OutputPath,
     [string]$HistoryPath,
     [switch]$PassThru,
-    [switch]$ExportCsv
+    [switch]$ExportCsv,
+    [ValidateRange(1, 50)]
+    [int]$ThrottleLimit = 5
 )
 
 # ---------------------------------------------------------------
@@ -1443,53 +1447,117 @@ Write-Host "Software Inventory V7 - Starting"
 Write-Host "Output path: $OutputPath"
 Write-Host "History path: $HistoryPath"
 Write-Host "Target computers: $($ComputerName -join ', ')"
+if ($ThrottleLimit -ne 5) { Write-Host "Throttle limit: $ThrottleLimit" }
 Write-Host ""
 
 $failures = @()
 
+# ---------------------------------------------------------------
+# Split hosts into local vs remote for parallel collection
+# ---------------------------------------------------------------
+$localHosts   = @()
+$remoteHosts  = @()
 foreach ($computer in $ComputerName) {
     $computer = $computer.Trim()
     if (-not $computer) { continue }
+    if (Test-IsLocalComputer $computer) { $localHosts += $computer }
+    else { $remoteHosts += $computer }
+}
 
-    Write-Host "========================================"
-    Write-Host "Processing: $computer"
-    Write-Host "========================================"
-
-    # 0. Health check (remote hosts only)
-    if (-not (Test-ComputerConnectivity -Computer $computer)) {
+# Health check remote hosts — filter out unreachable ones
+$healthyRemote = @()
+foreach ($computer in $remoteHosts) {
+    if (Test-ComputerConnectivity -Computer $computer) {
+        $healthyRemote += $computer
+    } else {
         Write-Warning "  $computer unreachable via WinRM. Skipping."
         $failures += [PSCustomObject]@{
             Computer  = $computer
             Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
             Errors    = "Unreachable via WinRM - host is offline or WinRM is not configured"
         }
-        Write-Host ""
-        continue
     }
+}
 
-    # 1. Inventory collection
+# ---------------------------------------------------------------
+# PHASE 1 — Collect inventory from all hosts
+# ---------------------------------------------------------------
+$allResults = @()
+
+# -- Local hosts: sequential (inline) --
+foreach ($computer in $localHosts) {
+    Write-Host "========================================"
+    Write-Host "Processing (local): $computer"
+    Write-Host "========================================"
+    $sw = @(); $up = @()
     Write-Host "  Collecting software (registry)..."
-    $software = @()
-    try {
-        $software = Get-SoftwareInventory -Computer $computer
-        Write-Host "    Found $($software.Count) software entries"
-    } catch {
-        Write-Warning "    Software inventory failed for $computer : $_"
-    }
-
+    try { $sw = Get-SoftwareInventory -Computer $computer; Write-Host "    Found $($sw.Count) software entries" }
+    catch { Write-Warning "    Software inventory failed for $computer : $_" }
     Write-Host "  Collecting updates (WUA)..."
-    $updates = @()
-    try {
-        $updates = Get-InstalledUpdates -Computer $computer
-        Write-Host "    Found $($updates.Count) updates"
-    } catch {
-        Write-Warning "    Update query failed for $computer : $_"
+    try { $up = Get-InstalledUpdates -Computer $computer; Write-Host "    Found $($up.Count) updates" }
+    catch { Write-Warning "    Update query failed for $computer : $_" }
+    $allResults += [PSCustomObject]@{ Computer = $computer; Software = $sw; Updates = $up }
+}
+
+# -- Remote hosts: parallel via Invoke-Command --
+if ($healthyRemote.Count -gt 0) {
+    Write-Host "========================================"
+    Write-Host "Remote collection: $($healthyRemote.Count) host(s) (throttle=$ThrottleLimit)"
+    Write-Host "========================================"
+
+    $remoteScriptBlock = [ScriptBlock]::Create(@"
+function Get-LocalSoftware {
+`$(${function:Get-LocalSoftware})
+}
+function Get-LocalUpdates {
+`$(${function:Get-LocalUpdates})
+}
+function Get-LocalHotfixFallback {
+`$(${function:Get-LocalHotfixFallback})
+}
+`$sw = @(); `$up = @()
+try { `$sw = Get-LocalSoftware } catch { }
+try { `$up = Get-LocalUpdates } catch { }
+@{ Software = `$sw; Updates = `$up }
+"@)
+
+    $remoteResults = Invoke-Command -ComputerName $healthyRemote -ScriptBlock $remoteScriptBlock `
+        -ThrottleLimit $ThrottleLimit -ErrorAction SilentlyContinue -ErrorVariable remoteErrors
+
+    foreach ($r in $remoteResults) {
+        $allResults += [PSCustomObject]@{
+            Computer = $r.PSComputerName
+            Software = $r.Software
+            Updates  = $r.Updates
+        }
     }
+    if ($remoteErrors) {
+        foreach ($e in $remoteErrors) {
+            $failedComp = if ($e.TargetObject) { $e.TargetObject } else { 'Unknown' }
+            Write-Warning "  Remote collection failed for $failedComp : $($e.Exception.Message)"
+            $failures += [PSCustomObject]@{
+                Computer  = $failedComp
+                Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+                Errors    = "Remote collection failed: $($e.Exception.Message)"
+            }
+        }
+    }
+}
+
+# ---------------------------------------------------------------
+# PHASE 2 — Process all results sequentially
+# ---------------------------------------------------------------
+foreach ($result in $allResults) {
+    $computer = $result.Computer
+    $software = $result.Software
+    $updates  = $result.Updates
+
+    Write-Host "========================================"
+    Write-Host "Processing: $computer"
+    Write-Host "========================================"
 
     # Check if computer failed completely
-    $computerFailed = ($software.Count -eq 0 -and $updates.Count -eq 0)
-
-    if ($computerFailed) {
+    if ($software.Count -eq 0 -and $updates.Count -eq 0) {
         Write-Warning "  $computer failed — no data collected. Skipping snapshot and report."
         $failures += [PSCustomObject]@{
             Computer  = $computer

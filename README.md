@@ -12,7 +12,7 @@ Collects installed software and Windows updates from local/remote machines via r
 ## Usage
 
 ```
-.\Get-SoftwareInventory.ps1 [-ComputerName "host1","host2"] [-OutputPath <path>] [-HistoryPath <path>] [-PassThru] [-ExportCsv]
+.\Get-SoftwareInventory.ps1 [-ComputerName "host1","host2"] [-OutputPath <path>] [-HistoryPath <path>] [-PassThru] [-ExportCsv] [-ThrottleLimit <n>]
 ```
 
 | Parameter     | Description |
@@ -22,6 +22,7 @@ Collects installed software and Windows updates from local/remote machines via r
 | `-HistoryPath`  | Root for JSON snapshots (default: `.\History`) |
 | `-PassThru`     | Return inventory objects to the pipeline |
 | `-ExportCsv`    | Export software and updates to CSV files alongside HTML |
+| `-ThrottleLimit`| Max concurrent remote hosts during parallel collection (default: 5, max: 50) |
 
 By default the script reads computer names from `hostnames.txt` (one per line).
 
@@ -50,6 +51,7 @@ Output\YYYY\MM\index.html                     Combined month view — all hosts 
 - **Failures isolation** — failed hosts don't appear in main inventory views; a green/red link on the root index shows failure status
 - **Sortable tables** — vanilla JavaScript, no dependencies; click any column header to sort
 - **PS 5.1 limitations honored** — no `Join-Path` with >2 segments, no `-WarningVariable`/`4>$null` in nested functions
+- **Parallel remote collection** — remote hosts are inventoried concurrently via a single `Invoke-Command` call (throttled by `-ThrottleLimit`); local hosts are always processed sequentially
 
 ## Limitations
 
