@@ -1109,7 +1109,7 @@ function sortTable(tableId, col) {
 # ---------------------------------------------------------------
 # New-AllSoftwareHtml
 # Generates Output\all-software.html aggregating every software
-# entry from all historical snapshots, deduplicated by name.
+# entry and patch from all historical snapshots, deduplicated.
 # ---------------------------------------------------------------
 function New-AllSoftwareHtml {
     param(
@@ -1121,6 +1121,7 @@ function New-AllSoftwareHtml {
     if ($snapshotFiles.Count -eq 0) { return }
 
     $allSoftware = @()
+    $allPatches = @()
     foreach ($file in $snapshotFiles) {
         try {
             $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
@@ -1134,42 +1135,80 @@ function New-AllSoftwareHtml {
                     SnapDate  = $snapDate
                 }
             }
+            foreach ($up in $snap.Updates) {
+                $allPatches += [PSCustomObject]@{
+                    Title       = $up.Title
+                    InstallDate = if ($up.InstallDate) { $up.InstallDate } else { 'Unknown' }
+                    Computer    = $snap.Computer
+                }
+            }
         } catch {
             # skip corrupt snapshots
         }
     }
 
-    if ($allSoftware.Count -eq 0) { return }
-
-    $grouped = $allSoftware | Group-Object -Property { ($_.Name -replace '\s+', ' ').Trim().ToLower() }
-
-    $entries = @()
-    foreach ($g in $grouped) {
-        $items = $g.Group
-        $computers = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object) -join ', '
-        $compCount = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
-        $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.SnapDate } -Descending |
-            Select-Object -First 1
-        $entries += [PSCustomObject]@{
-            Name          = $items[0].Name
-            Version       = $latest.Version
-            Publisher     = $latest.Publisher
-            ComputerList  = $computers
-            ComputerCount = $compCount
+    # --- Software dedup ---
+    $swEntries = @()
+    if ($allSoftware.Count -gt 0) {
+        $grouped = $allSoftware | Group-Object -Property { ($_.Name -replace '\s+', ' ').Trim().ToLower() }
+        foreach ($g in $grouped) {
+            $items = $g.Group
+            $computers = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object) -join ', '
+            $compCount = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
+            $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.SnapDate } -Descending |
+                Select-Object -First 1
+            $swEntries += [PSCustomObject]@{
+                Name          = $items[0].Name
+                Version       = $latest.Version
+                Publisher     = $latest.Publisher
+                ComputerList  = $computers
+                ComputerCount = $compCount
+            }
         }
+        $swEntries = $swEntries | Sort-Object Name
     }
-
-    $entries = $entries | Sort-Object Name
-    $totalSw = $entries.Count
+    $totalSw = $swEntries.Count
 
     $swRows = ''
-    foreach ($item in $entries) {
+    foreach ($item in $swEntries) {
         $swRows += @"
 <tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
     <td>$(ConvertTo-HtmlEncoded $item.ComputerCount)</td>
     <td>$(ConvertTo-HtmlEncoded $item.ComputerList)</td></tr>
+"@
+    }
+
+    # --- Patch dedup ---
+    $patchEntries = @()
+    if ($allPatches.Count -gt 0) {
+        $grouped = $allPatches | Group-Object -Property { ($_.Title -replace '\s+', ' ').Trim().ToLower() }
+        foreach ($g in $grouped) {
+            $items = $g.Group
+            $computers = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object) -join ', '
+            $compCount = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
+            $latest = $items | Sort-Object {
+                if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate }
+            } -Descending | Select-Object -First 1
+            $patchEntries += [PSCustomObject]@{
+                Title         = $items[0].Title
+                InstallDate   = $latest.InstallDate
+                ComputerList  = $computers
+                ComputerCount = $compCount
+            }
+        }
+        $patchEntries = $patchEntries | Sort-Object Title
+    }
+    $totalPatches = $patchEntries.Count
+
+    $patchRows = ''
+    foreach ($item in $patchEntries) {
+        $patchRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Title)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.ComputerCount)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.ComputerList)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td></tr>
 "@
     }
 
@@ -1180,11 +1219,16 @@ function New-AllSoftwareHtml {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>All Software - Historical Inventory</title>
+<title>Software &amp; Patches - Global Inventory</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
   h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
   .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 10px; margin-bottom: 15px; }
+  .summary-item { background: #e8f0fe; padding: 10px; border-radius: 4px; text-align: center; }
+  .summary-item .number { font-size: 24px; font-weight: bold; color: #1a3a5c; }
+  .summary-item .label { font-size: 13px; color: #666; }
+  .section-title { margin: 25px 0 10px 0; }
   .meta { font-size: 13px; color: #888; margin-top: 10px; }
   table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
   th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
@@ -1201,6 +1245,8 @@ function New-AllSoftwareHtml {
     body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
     body.theme-auto h1 { color: #80b0e0; }
     body.theme-auto .summary { background: #16213e; }
+    body.theme-auto .summary-item { background: #0f3460; }
+    body.theme-auto .summary-item .number { color: #80b0e0; }
     body.theme-auto table { background: #16213e; }
     body.theme-auto th { background: #0f3460; }
     body.theme-auto td { border-bottom: 1px solid #2a2a4e; }
@@ -1210,6 +1256,8 @@ function New-AllSoftwareHtml {
   body.dark { background: #1a1a2e; color: #e0e0e0; }
   body.dark h1 { color: #80b0e0; }
   body.dark .summary { background: #16213e; }
+  body.dark .summary-item { background: #0f3460; }
+  body.dark .summary-item .number { color: #80b0e0; }
   body.dark table { background: #16213e; }
   body.dark th { background: #0f3460; }
   body.dark td { border-bottom: 1px solid #2a2a4e; }
@@ -1261,11 +1309,22 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<h1>All Software (Historical)</h1>
+<h1>Software &amp; Patches</h1>
 <div class="summary">
-  <strong>$totalSw</strong> unique software titles found across all historical snapshots.
+  <div class="summary-grid">
+    <div class="summary-item">
+      <div class="number">$totalSw</div>
+      <div class="label">Unique Software Titles</div>
+    </div>
+    <div class="summary-item">
+      <div class="number">$totalPatches</div>
+      <div class="label">Unique Windows Patches</div>
+    </div>
+  </div>
   <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; <a href="index.html" class="back-link">&larr; Back to Archive</a></div>
 </div>
+
+<h2 class="section-title">3rd Party Software</h2>
 <input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
 <table id="sw-table"><thead><tr>
   <th onclick="sortTable('sw-table',0)">Name</th>
@@ -1274,12 +1333,21 @@ function sortTable(tableId, col) {
   <th onclick="sortTable('sw-table',3)">Computers</th>
   <th onclick="sortTable('sw-table',4)">Computer List</th>
 </tr></thead><tbody>$swRows</tbody></table>
+
+<h2 class="section-title">Windows Patches</h2>
+<input type="text" id="patch-filter" class="search-box" placeholder="Filter patches..." onkeyup="filterTable('patch-filter','patch-table')">
+<table id="patch-table"><thead><tr>
+  <th onclick="sortTable('patch-table',0)">Title</th>
+  <th onclick="sortTable('patch-table',1)">Computers</th>
+  <th onclick="sortTable('patch-table',2)">Computer List</th>
+  <th onclick="sortTable('patch-table',3)">Latest Install Date</th>
+</tr></thead><tbody>$patchRows</tbody></table>
 </body></html>
 "@
 
     $outputFile = Join-Path $OutputDir "all-software.html"
     $html | Out-File -FilePath $outputFile -Encoding utf8
-    Write-Host "  All Software page saved: $outputFile"
+    Write-Host "  Software & Patches page saved: $outputFile"
 }
 
 # ---------------------------------------------------------------
@@ -1433,7 +1501,7 @@ $(
 )
   </div>
   <div style="margin-top: 15px; border-top: 1px solid #e0e0e0; padding-top: 12px;">
-    <a href="all-software.html" class="failures-link" style="background:#e8f0fe;color:#1a3a5c;">View All Software</a>
+    <a href="all-software.html" class="failures-link" style="background:#e8f0fe;color:#1a3a5c;">Software &amp; Patches</a>
     <a href="failures.html" class="failures-link $(if ($FailureCount -gt 0) { 'red' } else { 'green' })">$(if ($FailureCount -gt 0) { "&#9888; View Failures ($FailureCount)" } else { "&#10003; No Failures" })</a>
   </div>
 </div>
