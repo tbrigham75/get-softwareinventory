@@ -1743,8 +1743,7 @@ function sortTable(tableId, col) {
 function Backfill-HistoryMonths {
     param(
         [string]$HistoryRoot,
-        [string]$Year,
-        [string]$UpToMonth
+        [string]$Year
     )
 
     Write-Host "  Backfill: HistoryRoot=$HistoryRoot"
@@ -1755,7 +1754,6 @@ function Backfill-HistoryMonths {
     }
 
     $backfilled = @()
-    $upToInt = [int]$UpToMonth
 
     foreach ($compDir in $computerDirs) {
         $compFolder = $compDir.Name
@@ -1802,30 +1800,37 @@ function Backfill-HistoryMonths {
         }
         Write-Host "  Backfill: $compFolder collected $($allSoftware.Count) sw, $($allPatches.Count) patches from $($snapFiles.Count) snapshots"
 
-        Write-Host "  Backfill: entering month loop for $compFolder (1 to $upToInt)"
-        for ($m = 1; $m -le $upToInt; $m++) {
-            $monthStr = $m.ToString('00')
+        # Discover unique months from InstallDates in the data
+        $foundMonths = @{}
+        foreach ($sw in $allSoftware.Values) {
+            try { $dt = [datetime]$sw.InstallDate; if ($dt.Year -eq [int]$Year) { $foundMonths[$dt.Month.ToString('00')] = $true } } catch { }
+        }
+        foreach ($up in $allPatches.Values) {
+            try { $dt = [datetime]$up.InstallDate; if ($dt.Year -eq [int]$Year) { $foundMonths[$dt.Month.ToString('00')] = $true } } catch { }
+        }
+
+        Write-Host "  Backfill: $compFolder discovered months: $(($foundMonths.Keys | Sort-Object) -join ', ')"
+
+        foreach ($monthStr in ($foundMonths.Keys | Sort-Object)) {
             $monthDir = [System.IO.Path]::Combine($HistoryRoot, $compFolder, $Year, $monthStr)
 
             $existing = Get-ChildItem -Path $monthDir -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
             if ($existing.Count -gt 0) {
-                Write-Host "      $compFolder month ${monthStr}: existing snapshot, skipping"
+                Write-Host "      $compFolder ${Year}-${monthStr}: existing snapshot, skipping"
                 continue
             }
 
-            $monthEnd = (Get-Date "$Year-$monthStr-01").AddMonths(1).AddDays(-1)
-
             $monthSw = $allSoftware.Values | Where-Object {
-                try { $dt = [datetime]$_.InstallDate; $dt -le $monthEnd }
+                try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$monthStr }
                 catch { $true }
             }
 
             $monthPatches = $allPatches.Values | Where-Object {
-                try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq $m }
+                try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$monthStr }
                 catch { $false }
             }
 
-            Write-Host "      $compFolder month ${monthStr}: $($monthSw.Count) sw, $($monthPatches.Count) patches"
+            Write-Host "      $compFolder ${Year}-${monthStr}: $($monthSw.Count) sw, $($monthPatches.Count) patches"
             if ($monthSw.Count -eq 0 -and $monthPatches.Count -eq 0) {
                 Write-Host "        -> skipping (empty)"
                 continue
@@ -1833,7 +1838,7 @@ function Backfill-HistoryMonths {
 
             Save-HistorySnapshot -Computer $compName -Software $monthSw -Updates $monthPatches `
                 -HistoryRoot $HistoryRoot -TargetYear $Year -TargetMonth $monthStr | Out-Null
-            Write-Host "      $compFolder month ${monthStr}: snapshot saved"
+            Write-Host "      $compFolder ${Year}-${monthStr}: snapshot saved"
 
             $backfilled += @{ Year = $Year; Month = $monthStr }
         }
@@ -2021,7 +2026,7 @@ $now = Get-Date
 $currentYear = $now.ToString('yyyy')
 $currentMonth = $now.ToString('MM')
 Write-Host "Backfilling missing history months..."
-$backfilled = Backfill-HistoryMonths -HistoryRoot $HistoryPath -Year $currentYear -UpToMonth $currentMonth
+$backfilled = Backfill-HistoryMonths -HistoryRoot $HistoryPath -Year $currentYear
 if ($backfilled.Count -gt 0) {
     $backfilledMonths = $backfilled | ForEach-Object { "$($_.Year)-$($_.Month)" } | Sort-Object -Unique
     Write-Host "  Backfilled $($backfilled.Count) month(s): $($backfilledMonths -join ', ')"
