@@ -1747,8 +1747,12 @@ function Backfill-HistoryMonths {
         [string]$UpToMonth
     )
 
+    Write-Host "  Backfill: HistoryRoot=$HistoryRoot"
     $computerDirs = Get-ChildItem -Path $HistoryRoot -Directory -ErrorAction SilentlyContinue
-    if ($computerDirs.Count -eq 0) { return @() }
+    if ($computerDirs.Count -eq 0) {
+        Write-Host "  Backfill: no computer directories found in $HistoryRoot"
+        return @()
+    }
 
     $backfilled = @()
     $upToInt = [int]$UpToMonth
@@ -1757,7 +1761,10 @@ function Backfill-HistoryMonths {
         $compFolder = $compDir.Name
 
         $snapFiles = Get-ChildItem -Path $compDir.FullName -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
-        if ($snapFiles.Count -eq 0) { continue }
+        if ($snapFiles.Count -eq 0) {
+            Write-Host "  Backfill: no snapshot files for $compFolder in $($compDir.FullName)"
+            continue
+        }
 
         $allSoftware = @{}
         $allPatches = @{}
@@ -1789,14 +1796,22 @@ function Backfill-HistoryMonths {
             }
         }
 
-        if ($allSoftware.Count -eq 0 -and $allPatches.Count -eq 0) { continue }
+        if ($allSoftware.Count -eq 0 -and $allPatches.Count -eq 0) {
+            Write-Host "  Backfill: $compFolder collected no data from $($snapFiles.Count) snapshots"
+            continue
+        }
+        Write-Host "  Backfill: $compFolder collected $($allSoftware.Count) sw, $($allPatches.Count) patches from $($snapFiles.Count) snapshots"
 
+        Write-Host "  Backfill: entering month loop for $compFolder (1 to $upToInt)"
         for ($m = 1; $m -le $upToInt; $m++) {
             $monthStr = $m.ToString('00')
             $monthDir = [System.IO.Path]::Combine($HistoryRoot, $compFolder, $Year, $monthStr)
 
             $existing = Get-ChildItem -Path $monthDir -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
-            if ($existing.Count -gt 0) { continue }
+            if ($existing.Count -gt 0) {
+                Write-Host "      $compFolder month ${monthStr}: existing snapshot, skipping"
+                continue
+            }
 
             $monthEnd = (Get-Date "$Year-$monthStr-01").AddMonths(1).AddDays(-1)
 
@@ -1818,6 +1833,7 @@ function Backfill-HistoryMonths {
 
             Save-HistorySnapshot -Computer $compName -Software $monthSw -Updates $monthPatches `
                 -HistoryRoot $HistoryRoot -TargetYear $Year -TargetMonth $monthStr | Out-Null
+            Write-Host "      $compFolder month ${monthStr}: snapshot saved"
 
             $backfilled += @{ Year = $Year; Month = $monthStr }
         }
@@ -2007,7 +2023,8 @@ $currentMonth = $now.ToString('MM')
 Write-Host "Backfilling missing history months..."
 $backfilled = Backfill-HistoryMonths -HistoryRoot $HistoryPath -Year $currentYear -UpToMonth $currentMonth
 if ($backfilled.Count -gt 0) {
-    Write-Host "  Backfilled $($backfilled.Count) month(s)"
+    $backfilledMonths = $backfilled | ForEach-Object { "$($_.Year)-$($_.Month)" } | Sort-Object -Unique
+    Write-Host "  Backfilled $($backfilled.Count) month(s): $($backfilledMonths -join ', ')"
 }
 Write-Host "Generating combined month reports..."
 $monthsToGenerate = $backfilled | ForEach-Object { $_.Month }
