@@ -414,13 +414,23 @@ function Save-HistorySnapshot {
         [string]$Computer,
         [PSObject[]]$Software,
         [PSObject[]]$Updates,
-        [string]$HistoryRoot
+        [string]$HistoryRoot,
+        [string]$TargetYear,
+        [string]$TargetMonth
     )
 
-    $now = Get-Date
-    $year = $now.ToString('yyyy')
-    $month = $now.ToString('MM')
-    $timestamp = $now.ToString('yyyyMMdd-HHmm')
+    if ($TargetYear -and $TargetMonth) {
+        $year = $TargetYear
+        $month = $TargetMonth
+        $timestamp = "$TargetYear$TargetMonth-010000"
+        $snapDate = Get-Date "$TargetYear-$TargetMonth-01 00:00:00"
+    } else {
+        $now = Get-Date
+        $year = $now.ToString('yyyy')
+        $month = $now.ToString('MM')
+        $timestamp = $now.ToString('yyyyMMdd-HHmm')
+        $snapDate = $now
+    }
 
     $compFolder = $Computer -replace '^\.$', 'localhost'
     $compFolder = $compFolder -replace '[/\\:*?"<>|]', '_'
@@ -435,7 +445,7 @@ function Save-HistorySnapshot {
     $snapshot = @{
         ScriptVersion = $scriptVersion
         Computer      = $Computer
-        Date          = $now.ToString('yyyy-MM-dd HH:mm:ss')
+        Date          = $snapDate.ToString('yyyy-MM-dd HH:mm:ss')
         SoftwareCount = $Software.Count
         UpdateCount   = $Updates.Count
         Software      = $Software | ForEach-Object {
@@ -1708,6 +1718,94 @@ function sortTable(tableId, col) {
 }
 
 # ---------------------------------------------------------------
+# Backfill-HistoryMonths
+# Creates snapshot files for missing months in the current year
+# by reconstructing software/patch presence from InstallDate.
+# ---------------------------------------------------------------
+function Backfill-HistoryMonths {
+    param(
+        [string]$HistoryRoot,
+        [string]$Year,
+        [string]$UpToMonth
+    )
+
+    $computerDirs = Get-ChildItem -Path $HistoryRoot -Directory -ErrorAction SilentlyContinue
+    if ($computerDirs.Count -eq 0) { return @() }
+
+    $backfilled = @()
+    $upToInt = [int]$UpToMonth
+
+    foreach ($compDir in $computerDirs) {
+        $compFolder = $compDir.Name
+
+        $snapFiles = Get-ChildItem -Path $compDir.FullName -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+        if ($snapFiles.Count -eq 0) { continue }
+
+        $allSoftware = @{}
+        $allPatches = @{}
+        $compName = $compFolder
+
+        foreach ($file in $snapFiles) {
+            try {
+                $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
+                $compName = $snap.Computer
+                foreach ($sw in $snap.Software) {
+                    $key = ($sw.Name -replace '\s+', ' ').Trim().ToLower()
+                    if (-not $allSoftware.ContainsKey($key) -or $sw.Version -ne 'Unknown') {
+                        $allSoftware[$key] = $sw
+                    }
+                }
+                foreach ($up in $snap.Updates) {
+                    $key = ($up.Title -replace '\s+', ' ').Trim().ToLower()
+                    if (-not $allPatches.ContainsKey($key)) {
+                        $allPatches[$key] = $up
+                    } else {
+                        $existing = $allPatches[$key]
+                        $ed = if ($existing.InstallDate -eq 'Unknown') { '0000-00-00' } else { $existing.InstallDate }
+                        $nd = if ($up.InstallDate -eq 'Unknown') { '0000-00-00' } else { $up.InstallDate }
+                        if ($nd -gt $ed) { $allPatches[$key] = $up }
+                    }
+                }
+            } catch {
+                # skip corrupt
+            }
+        }
+
+        if ($allSoftware.Count -eq 0 -and $allPatches.Count -eq 0) { continue }
+
+        for ($m = 1; $m -le $upToInt; $m++) {
+            $monthStr = $m.ToString('00')
+            $monthDir = [System.IO.Path]::Combine($HistoryRoot, $compFolder, $Year, $monthStr)
+
+            $existing = Get-ChildItem -Path $monthDir -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+            if ($existing.Count -gt 0) { continue }
+
+            $monthEnd = (Get-Date "$Year-$monthStr-01").AddMonths(1).AddDays(-1).ToString('yyyy-MM-dd')
+
+            $monthSw = $allSoftware.Values | Where-Object {
+                $d = "$($_.InstallDate)"
+                $d -eq 'Unknown' -or ($d -match '^\d{4}-\d{2}-\d{2}$' -and $d -le $monthEnd)
+            }
+
+            $monthPatches = $allPatches.Values | Where-Object {
+                $d = "$($_.InstallDate)"
+                $d -ne 'Unknown' -and $d -match '^\d{4}-\d{2}-\d{2}$' -and
+                $d.Substring(0, 7) -eq "$Year-$monthStr"
+            }
+
+            if ($monthSw.Count -eq 0 -and $monthPatches.Count -eq 0) { continue }
+
+            Save-HistorySnapshot -Computer $compName -Software $monthSw -Updates $monthPatches `
+                -HistoryRoot $HistoryRoot -TargetYear $Year -TargetMonth $monthStr | Out-Null
+
+            $backfilled += @{ Year = $Year; Month = $monthStr }
+        }
+    }
+
+    $backfilled
+}
+
+# ---------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------
 
@@ -1885,8 +1983,19 @@ foreach ($result in $allResults) {
 $now = Get-Date
 $currentYear = $now.ToString('yyyy')
 $currentMonth = $now.ToString('MM')
-Write-Host "Generating combined month report..."
-New-MonthReportHtml -Year $currentYear -Month $currentMonth -OutputDir $OutputPath -HistoryRoot $HistoryPath
+Write-Host "Backfilling missing history months..."
+$backfilled = Backfill-HistoryMonths -HistoryRoot $HistoryPath -Year $currentYear -UpToMonth $currentMonth
+if ($backfilled.Count -gt 0) {
+    Write-Host "  Backfilled $($backfilled.Count) month(s)"
+}
+Write-Host "Generating combined month reports..."
+$monthsToGenerate = $backfilled | ForEach-Object { $_.Month }
+$monthsToGenerate += $currentMonth
+$monthsToGenerate = $monthsToGenerate | Select-Object -Unique
+foreach ($m in $monthsToGenerate) {
+    Write-Host "  Generating month report for $currentYear-$m..."
+    New-MonthReportHtml -Year $currentYear -Month $m -OutputDir $OutputPath -HistoryRoot $HistoryPath
+}
 Write-Host "Generating failures page..."
 New-FailuresHtml -Failures $failures -OutputDir $OutputPath
 Write-Host "Generating All Software page..."
