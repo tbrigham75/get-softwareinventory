@@ -176,7 +176,29 @@ function Get-LocalSoftware {
             }
         }
     }
-    $items | Sort-Object Name
+    Merge-SoftwareDuplicates $items
+}
+
+# ---------------------------------------------------------------
+# Merge-SoftwareDuplicates
+# Removes duplicate software entries that share the same name
+# (e.g. KB patches / VC++ runtimes registered in both 32- and 64-bit
+#  uninstall keys).  Keeps the entry with the richest data.
+# ---------------------------------------------------------------
+function Merge-SoftwareDuplicates {
+    param([PSObject[]]$Items)
+    if (-not $Items -or $Items.Count -eq 0) { return @() }
+
+    $Items | Group-Object -Property { ($_.Name -replace '\s+', ' ').Trim().ToLower() } | ForEach-Object {
+        $group = $_.Group
+        if ($group.Count -eq 1) { $group }
+        else {
+            $group | Sort-Object { $_.Version -ne 'Unknown' } -Descending,
+                                 { $_.Architecture -eq '64-bit' } -Descending,
+                                 { $_.Architecture -eq '32-bit' } -Descending |
+                Select-Object -First 1
+        }
+    } | Sort-Object Name
 }
 
 # ---------------------------------------------------------------
@@ -237,7 +259,7 @@ function Get-RemoteRegistrySoftware {
         }
     }
     $reg.Close()
-    $items | Sort-Object Name
+    Merge-SoftwareDuplicates $items
 }
 
 # ---------------------------------------------------------------
