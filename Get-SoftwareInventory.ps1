@@ -206,6 +206,21 @@ function Merge-SoftwareDuplicates {
     } | Sort-Object Name
 }
 
+function Merge-UpdateDuplicates {
+    param([PSObject[]]$Items)
+    if (-not $Items -or $Items.Count -eq 0) { return @() }
+
+    $Items | Group-Object -Property { ($_.Title -replace '\s+', ' ').Trim().ToLower() } | ForEach-Object {
+        $group = $_.Group
+        if ($group.Count -eq 1) { $group }
+        else {
+            $group | Sort-Object {
+                if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate }
+            } -Descending | Select-Object -First 1
+        }
+    } | Sort-Object Title
+}
+
 # ---------------------------------------------------------------
 # Get-RemoteRegistrySoftware - fallback using .NET remote registry
 # ---------------------------------------------------------------
@@ -277,11 +292,11 @@ function Get-InstalledUpdates {
     param([string]$Computer)
 
     $isLocal = Test-IsLocalComputer $Computer
+    $result = @()
 
     if ($isLocal) {
-        Get-LocalUpdates
+        $result = Get-LocalUpdates
     } else {
-        $result = @()
         for ($attempt = 1; $attempt -le $script:RetryCount; $attempt++) {
             try {
                 $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
@@ -297,21 +312,24 @@ function Get-InstalledUpdates {
                 }
             }
         }
-        $result
     }
 
-    # If WUA returned nothing and we aren't local, try hotfix fallback via WinRM
     if (-not $result -or $result.Count -eq 0) {
         Write-Warning "  Trying Win32_QuickFixEngineering fallback for $Computer..."
-        try {
-            $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
-            $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalHotfixFallback} -ErrorAction Stop
-            Remove-PSSession $session
-        } catch {
-            Write-Warning "  Hotfix fallback also failed for $Computer : $_"
+        if ($isLocal) {
+            $result = Get-LocalHotfixFallback
+        } else {
+            try {
+                $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
+                $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalHotfixFallback} -ErrorAction Stop
+                Remove-PSSession $session
+            } catch {
+                Write-Warning "  Hotfix fallback also failed for $Computer : $_"
+            }
         }
     }
-    $result
+
+    Merge-UpdateDuplicates $result
 }
 
 # ---------------------------------------------------------------
@@ -1513,9 +1531,13 @@ function Get-LocalUpdates {
 function Get-LocalHotfixFallback {
 `$(${function:Get-LocalHotfixFallback})
 }
+function Merge-UpdateDuplicates {
+`$(${function:Merge-UpdateDuplicates})
+}
 `$sw = @(); `$up = @()
 try { `$sw = Get-LocalSoftware } catch { }
 try { `$up = Get-LocalUpdates } catch { }
+if (`$up) { `$up = Merge-UpdateDuplicates `$up }
 @{ Software = `$sw; Updates = `$up }
 "@)
 
