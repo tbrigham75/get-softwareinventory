@@ -90,6 +90,22 @@ function Test-IsLocalComputer {
 }
 
 # ---------------------------------------------------------------
+# Test-ComputerConnectivity
+# Quickly checks whether a remote computer is reachable via WinRM.
+# Returns $true if reachable, $false otherwise.
+# ---------------------------------------------------------------
+function Test-ComputerConnectivity {
+    param([string]$Computer)
+    if (Test-IsLocalComputer $Computer) { return $true }
+    try {
+        $null = Test-WSMan -ComputerName $Computer -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# ---------------------------------------------------------------
 # Get-SoftwareInventory
 # Reads installed software from registry Uninstall keys.
 # Returns a list of PSObjects with Name, Version, Publisher, InstallDate, Architecture.
@@ -1380,6 +1396,18 @@ foreach ($computer in $ComputerName) {
     Write-Host "========================================"
     Write-Host "Processing: $computer"
     Write-Host "========================================"
+
+    # 0. Health check (remote hosts only)
+    if (-not (Test-ComputerConnectivity -Computer $computer)) {
+        Write-Warning "  $computer unreachable via WinRM. Skipping."
+        $failures += [PSCustomObject]@{
+            Computer  = $computer
+            Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+            Errors    = "Unreachable via WinRM - host is offline or WinRM is not configured"
+        }
+        Write-Host ""
+        continue
+    }
 
     # 1. Inventory collection
     Write-Host "  Collecting software (registry)..."
