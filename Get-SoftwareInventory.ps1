@@ -585,7 +585,6 @@ function New-InventoryHtmlReport {
             $item.InstallDate
         } else { 'Unknown' }
         $title = $item.Title
-        if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
         $upRows += @"
 <tr><td>$(ConvertTo-HtmlEncoded $title)</td>
     <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
@@ -626,7 +625,6 @@ function New-InventoryHtmlReport {
                 $item.InstallDate
             } else { 'Unknown' }
             $title = $item.Title
-            if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
             $newUpRows += @"
 <tr><td>$(ConvertTo-HtmlEncoded $title)</td>
     <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
@@ -655,7 +653,7 @@ function New-InventoryHtmlReport {
   table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
   th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
   th:hover { background: #2a5a8c; }
-  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; word-break: break-word; }
   tr:hover td { background: #f0f5ff; }
   .section-title { margin: 25px 0 10px 0; }
   .badge-new { display: inline-block; background: #2e7d32; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
@@ -788,14 +786,14 @@ function sortTable(tableId, col) {
 
     # All Software
     $html += @"
-<h2 class="section-title">All Installed Software <span class="badge-new">$totalSw</span></h2>
+<h2 class="section-title">3rd Party Software <span class="badge-new">$totalSw</span></h2>
 <input type="text" id="allSw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('allSw-filter','allSw-table')">
 <table id="allSw-table"><thead><tr><th onclick="sortTable('allSw-table',0)">Name</th><th onclick="sortTable('allSw-table',1)">Version</th><th onclick="sortTable('allSw-table',2)">Publisher</th><th onclick="sortTable('allSw-table',3)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
 "@
 
     # All Updates
     $html += @"
-<h2 class="section-title">All Installed Updates <span class="badge-update">$totalUp</span></h2>
+<h2 class="section-title">Windows Patches <span class="badge-update">$totalUp</span></h2>
 <input type="text" id="allUp-filter" class="search-box" placeholder="Filter updates..." onkeyup="filterTable('allUp-filter','allUp-table')">
 <table id="allUp-table"><thead><tr><th onclick="sortTable('allUp-table',0)">Title</th><th onclick="sortTable('allUp-table',1)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
 </body></html>
@@ -937,7 +935,6 @@ function New-MonthReportHtml {
     foreach ($item in $allUpdates | Sort-Object Hostname, InstallDate -Descending) {
         $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') { $item.InstallDate } else { 'Unknown' }
         $title = $item.Title
-        if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
         $upRows += @"
 <tr><td>$(ConvertTo-HtmlEncoded $item.Hostname)</td>
     <td>$(ConvertTo-HtmlEncoded $title)</td>
@@ -968,7 +965,7 @@ function New-MonthReportHtml {
   table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
   th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
   th:hover { background: #2a5a8c; }
-  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; word-break: break-word; }
   tr:hover td { background: #f0f5ff; }
   .section-title { margin: 25px 0 10px 0; }
   .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
@@ -1069,11 +1066,11 @@ function sortTable(tableId, col) {
   <div class="meta">Computers: $compList &nbsp;|&nbsp; Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
 </div>
 
-<h2 class="section-title">Installed Software</h2>
+<h2 class="section-title">3rd Party Software</h2>
 <input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
 <table id="sw-table"><thead><tr><th onclick="sortTable('sw-table',0)">Hostname</th><th onclick="sortTable('sw-table',1)">Name</th><th onclick="sortTable('sw-table',2)">Version</th><th onclick="sortTable('sw-table',3)">Publisher</th><th onclick="sortTable('sw-table',4)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
 
-<h2 class="section-title">Installed Updates</h2>
+<h2 class="section-title">Windows Patches</h2>
 <input type="text" id="up-filter" class="search-box" placeholder="Filter updates..." onkeyup="filterTable('up-filter','up-table')">
 <table id="up-table"><thead><tr><th onclick="sortTable('up-table',0)">Hostname</th><th onclick="sortTable('up-table',1)">Title</th><th onclick="sortTable('up-table',2)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
 </body></html>
