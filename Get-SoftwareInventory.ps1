@@ -933,6 +933,13 @@ function New-MonthReportHtml {
     $computersFound = $computersFound | Select-Object -Unique
     $compCount = $computersFound.Count
     $totalSw = $allSoftware.Count
+
+    # Filter updates to only those installed in the selected month
+    $allUpdates = $allUpdates | Where-Object {
+        $_.InstallDate -ne 'Unknown' -and $_.InstallDate -match "^\d{4}-\d{2}-\d{2}$" -and
+        $_.InstallDate -ge "$Year-$Month-01" -and
+        $_.InstallDate -le "$Year-$Month-31"
+    }
     $totalUp = $allUpdates.Count
 
     # Build software rows with hostname column
