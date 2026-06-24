@@ -70,9 +70,10 @@ function ConvertTo-HtmlEncoded {
     $Value
 }
 
-# Default paths
-if (-not $OutputPath)  { $OutputPath  = Join-Path $scriptDir "Output" }
-if (-not $HistoryPath) { $HistoryPath = Join-Path $scriptDir "History" }
+# Default paths (outside git repo — no system info leaked)
+$webRoot = "C:\Utils\Web\get-softwareinventory"
+if (-not $OutputPath)  { $OutputPath  = Join-Path $webRoot "Output" }
+if (-not $HistoryPath) { $HistoryPath = Join-Path $webRoot "History" }
 
 # Resolve computers list
 if (-not $ComputerName -or $ComputerName.Count -eq 0) {
@@ -197,8 +198,8 @@ function Merge-SoftwareDuplicates {
         $group = $_.Group
         if ($group.Count -eq 1) { $group }
         else {
-            $group | Sort-Object { $_.Version -ne 'Unknown' } -Descending,
-                                 { $_.Architecture -eq '64-bit' } -Descending,
+            $group | Sort-Object { $_.Version -ne 'Unknown' },
+                                 { $_.Architecture -eq '64-bit' },
                                  { $_.Architecture -eq '32-bit' } -Descending |
                 Select-Object -First 1
         }
