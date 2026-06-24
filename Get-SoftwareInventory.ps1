@@ -2032,12 +2032,22 @@ if ($backfilled.Count -gt 0) {
     Write-Host "  Backfilled $($backfilled.Count) month(s): $($backfilledMonths -join ', ')"
 }
 Write-Host "Generating combined month reports..."
-$monthsToGenerate = $backfilled | ForEach-Object { $_.Month }
-$monthsToGenerate += $currentMonth
-$monthsToGenerate = $monthsToGenerate | Select-Object -Unique
-foreach ($m in $monthsToGenerate) {
-    Write-Host "  Generating month report for $currentYear-$m..."
-    New-MonthReportHtml -Year $currentYear -Month $m -OutputDir $OutputPath -HistoryRoot $HistoryPath
+$monthsToGenerate = @{}
+$historyComps = Get-ChildItem -Path $HistoryPath -Directory -ErrorAction SilentlyContinue
+foreach ($compDir in $historyComps) {
+    $yearDirs = Get-ChildItem -Path $compDir.FullName -Directory -ErrorAction SilentlyContinue
+    foreach ($yearDir in $yearDirs) {
+        $monthDirs = Get-ChildItem -Path $yearDir.FullName -Directory -ErrorAction SilentlyContinue
+        foreach ($monthDir in $monthDirs) {
+            if ((Get-ChildItem -Path $monthDir.FullName -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue).Count -gt 0) {
+                $monthsToGenerate["$($yearDir.Name)-$($monthDir.Name)"] = @{ Year = $yearDir.Name; Month = $monthDir.Name }
+            }
+        }
+    }
+}
+foreach ($entry in ($monthsToGenerate.Values | Sort-Object Year, Month)) {
+    Write-Host "  Generating month report for $($entry.Year)-$($entry.Month)..."
+    New-MonthReportHtml -Year $entry.Year -Month $entry.Month -OutputDir $OutputPath -HistoryRoot $HistoryPath
 }
 Write-Host "Generating failures page..."
 New-FailuresHtml -Failures $failures -OutputDir $OutputPath
