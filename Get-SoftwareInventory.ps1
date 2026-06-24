@@ -1,0 +1,1155 @@
+﻿<#
+.SYNOPSIS
+    Software Inventory and Update Reporting Script V7
+.DESCRIPTION
+    Collects installed software (from registry) and installed updates (from WUA),
+    saves persistent monthly JSON snapshots, and generates browsable HTML reports
+    with year/month navigation, install dates, and change tracking.
+.PARAMETER ComputerName
+    One or more computers to inventory. Overrides hostnames.txt if provided.
+.PARAMETER OutputPath
+    Root folder for HTML reports. Defaults to .\Output.
+.PARAMETER HistoryPath
+    Root folder for historical snapshots. Defaults to .\History.
+.PARAMETER PassThru
+    Return inventory objects to the pipeline instead of (or in addition to) saving files.
+.EXAMPLE
+    .\Get-SoftwareInventoryV7.ps1
+.EXAMPLE
+    .\Get-SoftwareInventoryV7.ps1 -ComputerName SRV01, SRV02
+.EXAMPLE
+    .\Get-SoftwareInventoryV7.ps1 -ComputerName localhost -OutputPath C:\Reports
+#>
+
+[CmdletBinding()]
+param(
+    [string[]]$ComputerName,
+    [string]$OutputPath,
+    [string]$HistoryPath,
+    [switch]$PassThru
+)
+
+# ---------------------------------------------------------------
+# Self-contained helper: resolve the directory this script lives in
+# ---------------------------------------------------------------
+function Get-ScriptDirectory {
+    if ($script:MyInvocation.MyCommand.Path) {
+        Split-Path -Parent $script:MyInvocation.MyCommand.Path
+    } elseif ($hostinvocation -and $hostinvocation.MyCommand.Path) {
+        Split-Path -Parent $hostinvocation.MyCommand.Path
+    } else {
+        (Get-Location).Path
+    }
+}
+
+$scriptDir = Get-ScriptDirectory
+
+# HTML-encode helper (no external dependency)
+function ConvertTo-HtmlEncoded {
+    param([string]$Value)
+    if (-not $Value) { return '' }
+    $Value = $Value -replace '&', '&amp;'
+    $Value = $Value -replace '<', '&lt;'
+    $Value = $Value -replace '>', '&gt;'
+    $Value = $Value -replace '"', '&quot;'
+    $Value = $Value -replace "'", '&#39;'
+    $Value
+}
+
+# Default paths
+if (-not $OutputPath)  { $OutputPath  = Join-Path $scriptDir "Output" }
+if (-not $HistoryPath) { $HistoryPath = Join-Path $scriptDir "History" }
+
+# Resolve computers list
+if (-not $ComputerName -or $ComputerName.Count -eq 0) {
+    $hostsFile = Join-Path $scriptDir "hostnames.txt"
+    if (Test-Path $hostsFile) {
+        $ComputerName = Get-Content $hostsFile | Where-Object { $_.Trim() -ne '' -and $_ -notmatch '^\s*#' }
+    } else {
+        $ComputerName = @($env:COMPUTERNAME)
+    }
+}
+
+# ---------------------------------------------------------------
+# Helper: is the target the local machine?
+# ---------------------------------------------------------------
+function Test-IsLocalComputer {
+    param([string]$Computer)
+    $local = $env:COMPUTERNAME
+    $Computer -eq $local -or $Computer -eq '127.0.0.1' -or $Computer -eq 'localhost' -or $Computer -eq '.'
+}
+
+# ---------------------------------------------------------------
+# Get-SoftwareInventory
+# Reads installed software from registry Uninstall keys.
+# Returns a list of PSObjects with Name, Version, Publisher, InstallDate, Architecture.
+# ---------------------------------------------------------------
+function Get-SoftwareInventory {
+    [CmdletBinding()]
+    param([string]$Computer)
+
+    $isLocal = Test-IsLocalComputer $Computer
+
+    if ($isLocal) {
+        Get-LocalSoftware
+    } else {
+        try {
+            $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
+            $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalSoftware} -ErrorAction Stop
+            Remove-PSSession $session
+            $result
+        } catch {
+            Write-Warning "Failed to connect to $Computer via WinRM: $_"
+            Write-Warning "Attempting remote registry fallback..."
+            Get-RemoteRegistrySoftware $Computer
+        }
+    }
+}
+
+# ---------------------------------------------------------------
+# Get-LocalSoftware (runs locally or inside Invoke-Command)
+# ---------------------------------------------------------------
+function Get-LocalSoftware {
+    $keys = @(
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+
+    $items = @()
+    foreach ($path in $keys) {
+        if (-not (Test-Path $path)) { continue }
+        $arch = if ($path -match 'WOW6432Node') { '32-bit' } elseif ($path -match '^HKCU') { 'User' } else { '64-bit' }
+        Get-ItemProperty $path | ForEach-Object {
+            $dispName = $_.DisplayName
+            if (-not $dispName) { return }
+            if ($_.DisplayName -match '^\s*$') { return }
+            $installDate = $_.InstallDate
+            if ($installDate -and $installDate -match '^\d{8}$') {
+                try { $installDate = [datetime]::ParseExact($installDate, 'yyyyMMdd', $null).ToString('yyyy-MM-dd') }
+                catch { $installDate = $installDate }
+            } elseif (-not $installDate) {
+                $installDate = 'Unknown'
+            }
+            $items += [PSCustomObject]@{
+                Name          = $dispName
+                Version       = if ($_.DisplayVersion) { $_.DisplayVersion } else { 'Unknown' }
+                Publisher     = if ($_.Publisher) { $_.Publisher } else { 'Unknown' }
+                InstallDate   = $installDate
+                Architecture  = $arch
+                UninstallKey  = $_.PSChildName
+            }
+        }
+    }
+    $items | Sort-Object Name
+}
+
+# ---------------------------------------------------------------
+# Get-RemoteRegistrySoftware - fallback using .NET remote registry
+# ---------------------------------------------------------------
+function Get-RemoteRegistrySoftware {
+    param([string]$Computer)
+
+    try {
+        $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $Computer)
+    } catch {
+        Write-Warning "Remote registry not available on $Computer : $_"
+        return @()
+    }
+
+    $subKeys = @(
+        'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+        'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+    )
+
+    $items = @()
+    foreach ($path in $subKeys) {
+        $arch = if ($path -match 'WOW6432Node') { '32-bit' } else { '64-bit' }
+        try {
+            $key = $reg.OpenSubKey($path)
+            if (-not $key) { continue }
+            $names = $key.GetSubKeyNames()
+            foreach ($name in $names) {
+                try {
+                    $sub = $key.OpenSubKey($name)
+                    $dispName = $sub.GetValue('DisplayName')
+                    if (-not $dispName) { continue }
+                    $installDate = $sub.GetValue('InstallDate')
+                    if ($installDate -and $installDate -match '^\d{8}$') {
+                        try { $installDate = [datetime]::ParseExact($installDate, 'yyyyMMdd', $null).ToString('yyyy-MM-dd') }
+                        catch { }
+                    } elseif (-not $installDate) {
+                        $installDate = 'Unknown'
+                    }
+                    $items += [PSCustomObject]@{
+                        Name          = $dispName
+                        Version       = if ($v = $sub.GetValue('DisplayVersion')) { $v } else { 'Unknown' }
+                        Publisher     = if ($p = $sub.GetValue('Publisher')) { $p } else { 'Unknown' }
+                        InstallDate   = $installDate
+                        Architecture  = $arch
+                        UninstallKey  = $name
+                    }
+                } catch {
+                    # skip bad key
+                } finally {
+                    if ($sub) { $sub.Close() }
+                }
+            }
+        } catch {
+            Write-Warning "Could not read $path on $Computer"
+        } finally {
+            if ($key) { $key.Close() }
+        }
+    }
+    $reg.Close()
+    $items | Sort-Object Name
+}
+
+# ---------------------------------------------------------------
+# Get-InstalledUpdates
+# Queries Windows Update Agent history.
+# Returns a list of PSObjects with Title, InstallDate, Result, Description.
+# ---------------------------------------------------------------
+function Get-InstalledUpdates {
+    [CmdletBinding()]
+    param([string]$Computer)
+
+    $isLocal = Test-IsLocalComputer $Computer
+
+    if ($isLocal) {
+        Get-LocalUpdates
+    } else {
+        try {
+            $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
+            $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalUpdates} -ErrorAction Stop
+            Remove-PSSession $session
+            $result
+        } catch {
+            Write-Warning "Failed to get updates from $Computer via WinRM: $_"
+            @()
+        }
+    }
+}
+
+# ---------------------------------------------------------------
+# Get-LocalUpdates (runs locally or inside Invoke-Command)
+# ---------------------------------------------------------------
+function Get-LocalUpdates {
+    try {
+        $sessionObj = New-Object -ComObject Microsoft.Update.Session
+        $searcher = $sessionObj.CreateUpdateSearcher()
+        $historyCount = $searcher.GetTotalHistoryCount()
+        if ($historyCount -eq 0) { return @() }
+
+        $allUpdates = $searcher.QueryHistory(0, $historyCount)
+        $updates = @()
+        for ($i = 0; $i -lt $allUpdates.Count; $i++) {
+            try {
+                $entry = $allUpdates.Item($i)
+                $resultCode = switch ($entry.ResultCode) {
+                    0 { 'NotStarted' }
+                    1 { 'InProgress' }
+                    2 { 'Succeeded' }
+                    3 { 'SucceededWithErrors' }
+                    4 { 'Failed' }
+                    5 { 'Aborted' }
+                    default { 'Unknown' }
+                }
+
+                $title = if ($entry.Title) { $entry.Title } else { 'Unknown' }
+                $date = if ($entry.Date) {
+                    try { $entry.Date.ToString('yyyy-MM-dd') } catch { 'Unknown' }
+                } else { 'Unknown' }
+
+                $updates += [PSCustomObject]@{
+                    Title       = $title
+                    InstallDate = $date
+                    Result      = $resultCode
+                    Description = if ($entry.Description) { $entry.Description } else { '' }
+                    UpdateID    = if ($entry.UpdateID) { $entry.UpdateID } else { '' }
+                }
+            } catch {
+                # skip bad entry
+            }
+        }
+
+        $updates | Where-Object { $_.Result -eq 'Succeeded' -or $_.Result -eq 'SucceededWithErrors' } |
+            Sort-Object InstallDate -Descending
+    } catch {
+        Write-Warning "WUA query failed: $_"
+        @()
+    }
+}
+
+# ---------------------------------------------------------------
+# Save-HistorySnapshot
+# Saves inventory data as a timestamped JSON file under HistoryPath.
+# ---------------------------------------------------------------
+function Save-HistorySnapshot {
+    param(
+        [string]$Computer,
+        [PSObject[]]$Software,
+        [PSObject[]]$Updates,
+        [string]$HistoryRoot
+    )
+
+    $now = Get-Date
+    $year = $now.ToString('yyyy')
+    $month = $now.ToString('MM')
+    $timestamp = $now.ToString('yyyyMMdd-HHmm')
+
+    $compFolder = $Computer -replace '^\.$', 'localhost'
+    $compFolder = $compFolder -replace '[/\\:*?"<>|]', '_'
+
+    $snapshotDir = [System.IO.Path]::Combine($HistoryRoot, $compFolder, $year, $month)
+    if (-not (Test-Path $snapshotDir)) {
+        New-Item -Path $snapshotDir -ItemType Directory -Force | Out-Null
+    }
+
+    $snapshotFile = Join-Path $snapshotDir "snapshot-$timestamp.json"
+
+    $snapshot = @{
+        ScriptVersion = '7.0'
+        Computer      = $Computer
+        Date          = $now.ToString('yyyy-MM-dd HH:mm:ss')
+        SoftwareCount = $Software.Count
+        UpdateCount   = $Updates.Count
+        Software      = $Software | ForEach-Object {
+            @{
+                Name         = $_.Name
+                Version      = $_.Version
+                Publisher    = $_.Publisher
+                InstallDate  = $_.InstallDate
+                Architecture = $_.Architecture
+            }
+        }
+        Updates = $Updates | ForEach-Object {
+            @{
+                Title       = $_.Title
+                InstallDate = $_.InstallDate
+                Result      = $_.Result
+            }
+        }
+    }
+
+    $snapshot | ConvertTo-Json -Depth 4 | Out-File -FilePath $snapshotFile -Encoding utf8
+    Write-Host "  Snapshot saved: $snapshotFile"
+    $snapshotFile
+}
+
+# ---------------------------------------------------------------
+# Load-HistorySnapshot
+# Loads the most recent JSON snapshot for the given computer.
+# Returns $null if no snapshot exists.
+# ---------------------------------------------------------------
+function Load-HistorySnapshot {
+    param(
+        [string]$Computer,
+        [string]$HistoryRoot
+    )
+
+    $compFolder = $Computer -replace '[/\\:*?"<>|]', '_'
+    $historyDir = Join-Path $HistoryRoot $compFolder
+    if (-not (Test-Path $historyDir)) { return $null }
+
+    $snapshotFiles = Get-ChildItem -Path $historyDir -Recurse -Filter 'snapshot-*.json' |
+        Sort-Object LastWriteTime -Descending
+
+    if ($snapshotFiles.Count -eq 0) { return $null }
+
+    try {
+        $data = Get-Content -Path $snapshotFiles[0].FullName -Raw | ConvertFrom-Json
+        $data
+    } catch {
+        Write-Warning "Could not load previous snapshot: $_"
+        $null
+    }
+}
+
+# ---------------------------------------------------------------
+# Compare-Snapshots
+# Compares current and previous snapshots, returning
+# NewSoftware, RemovedSoftware, NewUpdates.
+# ---------------------------------------------------------------
+function Compare-Snapshots {
+    param(
+        [PSObject[]]$CurrentSoftware,
+        [PSObject[]]$CurrentUpdates,
+        [PSObject]$PreviousSnapshot
+    )
+
+    if (-not $PreviousSnapshot) {
+        return @{
+            NewSoftware    = @()
+            RemovedSoftware = @()
+            NewUpdates     = @()
+        }
+    }
+
+    # Normalize names for comparison
+    $prevSw = $PreviousSnapshot.Software | ForEach-Object {
+        [PSCustomObject]@{
+            Name        = $_.Name
+            Normalized  = ($_.Name -replace '\s+', ' ').Trim().ToLower()
+            Version     = $_.Version
+        }
+    }
+
+    $currSw = $CurrentSoftware | ForEach-Object {
+        [PSCustomObject]@{
+            Name        = $_.Name
+            Normalized  = ($_.Name -replace '\s+', ' ').Trim().ToLower()
+            Version     = $_.Version
+            Publisher   = $_.Publisher
+            InstallDate = $_.InstallDate
+        }
+    }
+
+    $prevNorm = $prevSw | ForEach-Object { $_.Normalized }
+    $currNorm = $currSw | ForEach-Object { $_.Normalized }
+
+    $newSw = $currSw | Where-Object { $_.Normalized -notin $prevNorm }
+    $removedSw = $prevSw | Where-Object { $_.Normalized -notin $currNorm }
+
+    # Updates comparison
+    $prevUpTitles = $PreviousSnapshot.Updates | ForEach-Object {
+        ($_.Title -replace '\s+', ' ').Trim()
+    }
+    $currUpTitles = $CurrentUpdates | ForEach-Object {
+        ($_.Title -replace '\s+', ' ').Trim()
+    }
+
+    $newUp = $CurrentUpdates | Where-Object {
+        ($_.Title -replace '\s+', ' ').Trim() -notin $prevUpTitles
+    }
+
+    @{
+        NewSoftware     = $newSw | Sort-Object Name
+        RemovedSoftware = $removedSw | Sort-Object Name
+        NewUpdates      = $newUp | Sort-Object Title
+    }
+}
+
+# ---------------------------------------------------------------
+# New-InventoryHtmlReport
+# Generates a full HTML report page for a single computer run.
+# ---------------------------------------------------------------
+function New-InventoryHtmlReport {
+    param(
+        [string]$Computer,
+        [PSObject[]]$Software,
+        [PSObject[]]$Updates,
+        [hashtable]$Comparison,
+        [PSObject]$PreviousSnapshot,
+        [string]$OutputDir
+    )
+
+    $now = Get-Date
+    $year = $now.ToString('yyyy')
+    $month = $now.ToString('MM')
+    $reportDate = $now.ToString('yyyy-MM-dd HH:mm:ss')
+
+    $newSwCount = if ($Comparison) { $Comparison.NewSoftware.Count } else { 0 }
+    $remSwCount = if ($Comparison) { $Comparison.RemovedSoftware.Count } else { 0 }
+    $newUpCount = if ($Comparison) { $Comparison.NewUpdates.Count } else { 0 }
+    $totalSw = $Software.Count
+    $totalUp = $Updates.Count
+
+    # Date anchor
+    $anchor = "$year-$month"
+
+    # Build software table rows
+    $swRows = ''
+    foreach ($item in $Software) {
+        $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') {
+            $item.InstallDate
+        } else { 'Unknown' }
+        $swRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
+    <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
+"@
+    }
+
+    # Build update table rows
+    $upRows = ''
+    foreach ($item in $Updates) {
+        $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') {
+            $item.InstallDate
+        } else { 'Unknown' }
+        $title = $item.Title
+        if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
+        $upRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $title)</td>
+    <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
+"@
+    }
+
+    # New software rows
+    $newSwRows = ''
+    if ($newSwCount -gt 0) {
+        foreach ($item in $Comparison.NewSoftware) {
+            $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') {
+                $item.InstallDate
+            } else { 'Unknown' }
+            $newSwRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
+    <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
+"@
+        }
+    }
+
+    # Removed software rows
+    $remSwRows = ''
+    if ($remSwCount -gt 0) {
+        foreach ($item in $Comparison.RemovedSoftware) {
+            $remSwRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Version)</td></tr>
+"@
+        }
+    }
+
+    # New update rows
+    $newUpRows = ''
+    if ($newUpCount -gt 0) {
+        foreach ($item in $Comparison.NewUpdates) {
+            $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') {
+                $item.InstallDate
+            } else { 'Unknown' }
+            $title = $item.Title
+            if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
+            $newUpRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $title)</td>
+    <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
+"@
+        }
+    }
+
+    $prevDate = if ($PreviousSnapshot) { $PreviousSnapshot.Date } else { 'N/A' }
+
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Software Inventory - $Computer - $anchor</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1, h2, h3 { color: #1a3a5c; }
+  .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 10px; }
+  .summary-item { background: #e8f0fe; padding: 10px; border-radius: 4px; text-align: center; }
+  .summary-item .number { font-size: 24px; font-weight: bold; color: #1a3a5c; }
+  .summary-item .label { font-size: 13px; color: #666; }
+  .meta { font-size: 13px; color: #888; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
+  th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
+  th:hover { background: #2a5a8c; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
+  tr:hover td { background: #f0f5ff; }
+  .section-title { margin: 25px 0 10px 0; }
+  .badge-new { display: inline-block; background: #2e7d32; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge-removed { display: inline-block; background: #c62828; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge-update { display: inline-block; background: #1565c0; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  a.back-link { color: #1a3a5c; text-decoration: none; }
+  a.back-link:hover { text-decoration: underline; }
+</style>
+<script>
+function sortTable(tableId, col) {
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  var dir = table.getAttribute('data-sort-dir-' + col) === 'asc' ? 'desc' : 'asc';
+  table.setAttribute('data-sort-dir-' + col, dir);
+  var multiplier = dir === 'asc' ? 1 : -1;
+  rows.sort(function(a, b) {
+    var aText = a.children[col].textContent.trim();
+    var bText = b.children[col].textContent.trim();
+    var aDate = Date.parse(aText);
+    var bDate = Date.parse(bText);
+    if (!isNaN(aDate) && !isNaN(bDate)) return (aDate - bDate) * multiplier;
+    return aText.localeCompare(bText, undefined, { numeric: true }) * multiplier;
+  });
+  rows.forEach(function(row) { tbody.appendChild(row); });
+}
+</script>
+</head>
+<body>
+<a class="back-link" href="../../../index.html">&larr; Back to archive</a>
+<h1>Software Inventory Report</h1>
+<div class="summary">
+  <div class="summary-grid">
+    <div class="summary-item"><div class="number">$totalSw</div><div class="label">Installed Software</div></div>
+    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Installed Updates</div></div>
+    <div class="summary-item"><div class="number"><span class="badge-new">+$newSwCount</span></div><div class="label">New Software</div></div>
+    <div class="summary-item"><div class="number"><span class="badge-removed">$remSwCount</span></div><div class="label">Removed Software</div></div>
+    <div class="summary-item"><div class="number"><span class="badge-update">+$newUpCount</span></div><div class="label">New Updates</div></div>
+  </div>
+  <div class="meta">Computer: <strong>$Computer</strong> &nbsp;|&nbsp; Generated: $reportDate &nbsp;|&nbsp; Previous snapshot: $prevDate</div>
+</div>
+"@
+
+    # New Software section
+    if ($newSwCount -gt 0) {
+        $html += @"
+<h2 class="section-title">New Software <span class="badge-new">$newSwCount</span></h2>
+<table id="newSw-table"><thead><tr><th onclick="sortTable('newSw-table',0)">Name</th><th onclick="sortTable('newSw-table',1)">Version</th><th onclick="sortTable('newSw-table',2)">Install Date</th></tr></thead><tbody>$newSwRows</tbody></table>
+"@
+    }
+
+    # Removed Software section
+    if ($remSwCount -gt 0) {
+        $html += @"
+<h2 class="section-title">Removed Software <span class="badge-removed">$remSwCount</span></h2>
+<table id="remSw-table"><thead><tr><th onclick="sortTable('remSw-table',0)">Name</th><th onclick="sortTable('remSw-table',1)">Version</th></tr></thead><tbody>$remSwRows</tbody></table>
+"@
+    }
+
+    # New Updates section
+    if ($newUpCount -gt 0) {
+        $html += @"
+<h2 class="section-title">New Updates <span class="badge-update">$newUpCount</span></h2>
+<table id="newUp-table"><thead><tr><th onclick="sortTable('newUp-table',0)">Title</th><th onclick="sortTable('newUp-table',1)">Install Date</th></tr></thead><tbody>$newUpRows</tbody></table>
+"@
+    }
+
+    # All Software
+    $html += @"
+<h2 class="section-title">All Installed Software <span class="badge-new">$totalSw</span></h2>
+<table id="allSw-table"><thead><tr><th onclick="sortTable('allSw-table',0)">Name</th><th onclick="sortTable('allSw-table',1)">Version</th><th onclick="sortTable('allSw-table',2)">Publisher</th><th onclick="sortTable('allSw-table',3)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
+"@
+
+    # All Updates
+    $html += @"
+<h2 class="section-title">All Installed Updates <span class="badge-update">$totalUp</span></h2>
+<table id="allUp-table"><thead><tr><th onclick="sortTable('allUp-table',0)">Title</th><th onclick="sortTable('allUp-table',1)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
+</body></html>
+"@
+
+    # Ensure output directory exists
+    $compFolder = $Computer -replace '[/\\:*?"<>|]', '_'
+    $outDir = [System.IO.Path]::Combine($OutputDir, $compFolder, $year, $month)
+    if (-not (Test-Path $outDir)) {
+        New-Item -Path $outDir -ItemType Directory -Force | Out-Null
+    }
+
+    $reportFile = Join-Path $outDir "report.html"
+    $html | Out-File -FilePath $reportFile -Encoding utf8
+    Write-Host "  Report saved: $reportFile"
+    $reportFile
+}
+
+# ---------------------------------------------------------------
+# New-MonthReportHtml
+# Generates a combined per-month index page at Output\YYYY\MM\index.html
+# that aggregates all computers' snapshots with a Hostname column.
+# ---------------------------------------------------------------
+function New-MonthReportHtml {
+    param(
+        [string]$Year,
+        [string]$Month,
+        [string]$OutputDir,
+        [string]$HistoryRoot
+    )
+
+    $monthDir = [System.IO.Path]::Combine($OutputDir, $Year, $Month)
+    if (-not (Test-Path $monthDir)) {
+        New-Item -Path $monthDir -ItemType Directory -Force | Out-Null
+    }
+
+    $monthName = switch ($Month) {
+        '01' { 'January' }; '02' { 'February' }; '03' { 'March' }; '04' { 'April' }
+        '05' { 'May' }; '06' { 'June' }; '07' { 'July' }; '08' { 'August' }
+        '09' { 'September' }; '10' { 'October' }; '11' { 'November' }; '12' { 'December' }
+        default { $Month }
+    }
+
+    # Scan all computer history folders for snapshots in this year/month
+    $computerDirs = Get-ChildItem -Path $HistoryRoot -Directory -ErrorAction SilentlyContinue
+
+    $allSoftware = @()
+    $allUpdates = @()
+    $computersFound = @()
+
+    foreach ($compDir in $computerDirs) {
+        $compFolder = $compDir.Name
+        $snapDir = [System.IO.Path]::Combine($HistoryRoot, $compFolder, $Year, $Month)
+        if (-not (Test-Path $snapDir)) { continue }
+
+        $snapFiles = Get-ChildItem -Path $snapDir -Filter 'snapshot-*.json' |
+            Sort-Object LastWriteTime -Descending
+        if ($snapFiles.Count -eq 0) { continue }
+
+        try {
+            $snap = Get-Content -Path $snapFiles[0].FullName -Raw | ConvertFrom-Json
+            $computersFound += $snap.Computer
+
+            foreach ($sw in $snap.Software) {
+                $allSoftware += [PSCustomObject]@{
+                    Hostname    = $snap.Computer
+                    Name        = $sw.Name
+                    Version     = $sw.Version
+                    Publisher   = $sw.Publisher
+                    InstallDate = if ($sw.InstallDate) { $sw.InstallDate } else { 'Unknown' }
+                }
+            }
+            foreach ($up in $snap.Updates) {
+                $allUpdates += [PSCustomObject]@{
+                    Hostname    = $snap.Computer
+                    Title       = $up.Title
+                    InstallDate = if ($up.InstallDate) { $up.InstallDate } else { 'Unknown' }
+                }
+            }
+        } catch {
+            Write-Warning "  Could not load snapshot for $compFolder : $_"
+        }
+    }
+
+    $computersFound = $computersFound | Select-Object -Unique
+    $compCount = $computersFound.Count
+    $totalSw = $allSoftware.Count
+    $totalUp = $allUpdates.Count
+
+    # Build software rows with hostname column
+    $swRows = ''
+    foreach ($item in $allSoftware | Sort-Object Hostname, Name) {
+        $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') { $item.InstallDate } else { 'Unknown' }
+        $swRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Hostname)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Name)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
+    <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
+"@
+    }
+
+    # Build update rows with hostname column
+    $upRows = ''
+    foreach ($item in $allUpdates | Sort-Object Hostname, InstallDate -Descending) {
+        $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') { $item.InstallDate } else { 'Unknown' }
+        $title = $item.Title
+        if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
+        $upRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Hostname)</td>
+    <td>$(ConvertTo-HtmlEncoded $title)</td>
+    <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
+"@
+    }
+
+    # Computer list for summary
+    $compList = ($computersFound | Sort-Object) -join ', '
+
+    $now = Get-Date
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Software Inventory - $monthName $Year</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1, h2, h3 { color: #1a3a5c; }
+  .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 10px; }
+  .summary-item { background: #e8f0fe; padding: 10px; border-radius: 4px; text-align: center; }
+  .summary-item .number { font-size: 24px; font-weight: bold; color: #1a3a5c; }
+  .summary-item .label { font-size: 13px; color: #666; }
+  .meta { font-size: 13px; color: #888; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
+  th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
+  th:hover { background: #2a5a8c; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
+  tr:hover td { background: #f0f5ff; }
+  .section-title { margin: 25px 0 10px 0; }
+  a.back-link { color: #1a3a5c; text-decoration: none; }
+  a.back-link:hover { text-decoration: underline; }
+</style>
+<script>
+function sortTable(tableId, col) {
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  var dir = table.getAttribute('data-sort-dir-' + col) === 'asc' ? 'desc' : 'asc';
+  table.setAttribute('data-sort-dir-' + col, dir);
+  var multiplier = dir === 'asc' ? 1 : -1;
+  rows.sort(function(a, b) {
+    var aText = a.children[col].textContent.trim();
+    var bText = b.children[col].textContent.trim();
+    var aDate = Date.parse(aText);
+    var bDate = Date.parse(bText);
+    if (!isNaN(aDate) && !isNaN(bDate)) return (aDate - bDate) * multiplier;
+    return aText.localeCompare(bText, undefined, { numeric: true }) * multiplier;
+  });
+  rows.forEach(function(row) { tbody.appendChild(row); });
+}
+</script>
+</head>
+<body>
+<a class="back-link" href="../../index.html">&larr; Back to archive</a>
+<h1>$monthName $Year &mdash; Combined Inventory</h1>
+<div class="summary">
+  <div class="summary-grid">
+    <div class="summary-item"><div class="number">$compCount</div><div class="label">Computers</div></div>
+    <div class="summary-item"><div class="number">$totalSw</div><div class="label">Software Entries</div></div>
+    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Updates</div></div>
+  </div>
+  <div class="meta">Computers: $compList &nbsp;|&nbsp; Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
+</div>
+
+<h2 class="section-title">Installed Software</h2>
+<table id="sw-table"><thead><tr><th onclick="sortTable('sw-table',0)">Hostname</th><th onclick="sortTable('sw-table',1)">Name</th><th onclick="sortTable('sw-table',2)">Version</th><th onclick="sortTable('sw-table',3)">Publisher</th><th onclick="sortTable('sw-table',4)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
+
+<h2 class="section-title">Installed Updates</h2>
+<table id="up-table"><thead><tr><th onclick="sortTable('up-table',0)">Hostname</th><th onclick="sortTable('up-table',1)">Title</th><th onclick="sortTable('up-table',2)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
+</body></html>
+"@
+
+    $indexFile = Join-Path $monthDir "index.html"
+    $html | Out-File -FilePath $indexFile -Encoding utf8
+    Write-Host "  Month index saved: $indexFile"
+}
+
+# ---------------------------------------------------------------
+# New-WebsiteIndexHtml
+# Generates the root Output\index.html with year/month navigation
+# linking to combined month index pages across all computers.
+# ---------------------------------------------------------------
+function New-WebsiteIndexHtml {
+    param(
+        [string]$OutputDir,
+        [int]$FailureCount = 0
+    )
+
+    if (-not (Test-Path $OutputDir)) { return }
+
+    # Gather all report.html files across all computer subfolders
+    $reports = Get-ChildItem -Path $OutputDir -Recurse -Filter 'report.html' -ErrorAction SilentlyContinue |
+        Sort-Object FullName
+
+    # Use relative paths from OutputDir so indices are predictable
+    $OutputDirNorm = $OutputDir.TrimEnd('\/')
+
+    # Group by year, then month
+    $years = @{}
+    foreach ($r in $reports) {
+        $rel = $r.Directory.FullName.Substring($OutputDirNorm.Length + 1)
+        $parts = $rel -split '[/\\]'
+        if ($parts.Count -ge 3) {
+            $compFolder = $parts[0]
+            $y = $parts[1]
+            $m = $parts[2]
+            if (-not $years[$y]) { $years[$y] = @{} }
+            if (-not $years[$y][$m]) { $years[$y][$m] = @() }
+            $years[$y][$m] += @{ Computer = $compFolder; Path = $r.FullName }
+        }
+    }
+
+    # If no report.html files found, try finding month index files
+    if ($years.Count -eq 0) {
+        $monthIndexes = Get-ChildItem -Path $OutputDir -Recurse -Filter 'index.html' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Directory.Parent.Name -match '^\d{4}$' } |
+            Sort-Object FullName
+        foreach ($r in $monthIndexes) {
+            $rel = $r.Directory.FullName.Substring($OutputDirNorm.Length + 1)
+            $parts = $rel -split '[/\\]'
+            if ($parts.Count -ge 2) {
+                $y = $parts[0]
+                $m = $parts[1]
+                if (-not $years[$y]) { $years[$y] = @{} }
+                if (-not $years[$y][$m]) { $years[$y][$m] = @() }
+                $years[$y][$m] += @{ Computer = ''; Path = $r.FullName }
+            }
+        }
+    }
+
+    # Build nav HTML
+    $navHtml = ''
+    $sortedYears = $years.Keys | Sort-Object -Descending
+    foreach ($y in $sortedYears) {
+        $navHtml += "<div class='year-group'><h2 class='year-heading'><a href='#year-$y'>$y</a></h2><div class='month-list'>`n"
+        $sortedMonths = $years[$y].Keys | Sort-Object
+        foreach ($m in $sortedMonths) {
+            $monthName = switch ($m) {
+                '01' { 'January' }; '02' { 'February' }; '03' { 'March' }; '04' { 'April' }
+                '05' { 'May' }; '06' { 'June' }; '07' { 'July' }; '08' { 'August' }
+                '09' { 'September' }; '10' { 'October' }; '11' { 'November' }; '12' { 'December' }
+                default { $m }
+            }
+            $compCount = ($years[$y][$m] | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
+            $navHtml += "<a href='./$y/$m/index.html' class='month-link'>$monthName $y ($compCount computers)</a>`n"
+        }
+        $navHtml += "</div></div>"
+    }
+
+    $now = Get-Date
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Software Inventory Archive</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
+  .year-group { background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 15px; padding: 15px; }
+  .year-heading { margin: 0 0 10px 0; }
+  .year-heading a { color: #1a3a5c; text-decoration: none; }
+  .year-heading a:hover { text-decoration: underline; }
+  .month-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .month-link { display: inline-block; background: #e8f0fe; color: #1a3a5c; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 14px; }
+  .month-link:hover { background: #d0e0f0; }
+  .year-section { margin-top: 30px; color: #1a3a5c; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+  .month-section { margin-top: 20px; }
+  .month-section a { color: #2a5a8c; text-decoration: none; }
+  .month-section a:hover { text-decoration: underline; }
+  .meta { font-size: 13px; color: #888; margin-top: 20px; }
+  .failures-link { display: inline-block; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 14px; margin-top: 10px; }
+  .failures-link.green { background: #e8f5e9; color: #2e7d32; }
+  .failures-link.green:hover { background: #c8e6c9; }
+  .failures-link.red { background: #ffebee; color: #c62828; }
+  .failures-link.red:hover { background: #ffcdd2; }
+</style>
+</head>
+<body>
+<h1>Software Inventory Archive</h1>
+
+<div class="year-group">
+  <h2 style="margin:0 0 10px 0;">Jump to Year</h2>
+  <div class="month-list">
+$(
+    ($sortedYears | ForEach-Object { "<a href='#year-$_' class='month-link'>$_</a>" }) -join "`n"
+)
+  </div>
+  <div style="margin-top: 15px; border-top: 1px solid #e0e0e0; padding-top: 12px;">
+    <a href="failures.html" class="failures-link $(if ($FailureCount -gt 0) { 'red' } else { 'green' })">$(if ($FailureCount -gt 0) { "&#9888; View Failures ($FailureCount)" } else { "&#10003; No Failures" })</a>
+  </div>
+</div>
+
+$navHtml
+
+<div class="meta">Last updated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
+</body></html>
+"@
+
+    $indexFile = Join-Path $OutputDir "index.html"
+    $html | Out-File -FilePath $indexFile -Encoding utf8
+    Write-Host "  Root index saved: $indexFile"
+}
+
+# ---------------------------------------------------------------
+# New-FailuresHtml
+# Generates Output\failures.html listing computers that could not
+# be inventoried, with error details and timestamps.
+# ---------------------------------------------------------------
+function New-FailuresHtml {
+    param(
+        [PSObject[]]$Failures,
+        [string]$OutputDir
+    )
+
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
+    }
+
+    if (-not $Failures -or $Failures.Count -eq 0) {
+        # No failures — generate a clean page stating that
+        $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inventory Failures</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
+  .success { background: #e8f5e9; padding: 30px; border-radius: 6px; text-align: center; font-size: 18px; color: #2e7d32; }
+  a.back-link { color: #1a3a5c; text-decoration: none; }
+  a.back-link:hover { text-decoration: underline; }
+  .meta { font-size: 13px; color: #888; margin-top: 20px; }
+</style>
+</head>
+<body>
+<a class="back-link" href="index.html">&larr; Back to archive</a>
+<h1>Inventory Failures</h1>
+<div class="success">All computers were successfully inventoried.</div>
+<div class="meta">Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</div>
+</body></html>
+"@
+    } else {
+        $rows = ''
+        foreach ($f in $Failures) {
+            $errors = $f.Errors -replace '`n', '<br>'
+            $rows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $f.Computer)</td>
+    <td>$(ConvertTo-HtmlEncoded $f.Timestamp)</td>
+    <td>$errors</td></tr>
+"@
+        }
+
+        $count = $Failures.Count
+        $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inventory Failures ($count)</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1 { color: #c62828; border-bottom: 2px solid #c62828; padding-bottom: 8px; }
+  .summary { background: #ffebee; padding: 15px; border-radius: 6px; margin-bottom: 20px; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  th { background: #c62828; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
+  th:hover { background: #e53935; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+  tr:hover td { background: #fff5f5; }
+  a.back-link { color: #1a3a5c; text-decoration: none; }
+  a.back-link:hover { text-decoration: underline; }
+  .meta { font-size: 13px; color: #888; margin-top: 20px; }
+  .error-detail { font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+</style>
+<script>
+function sortTable(tableId, col) {
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  var dir = table.getAttribute('data-sort-dir-' + col) === 'asc' ? 'desc' : 'asc';
+  table.setAttribute('data-sort-dir-' + col, dir);
+  var multiplier = dir === 'asc' ? 1 : -1;
+  rows.sort(function(a, b) {
+    var aText = a.children[col].textContent.trim();
+    var bText = b.children[col].textContent.trim();
+    var aDate = Date.parse(aText);
+    var bDate = Date.parse(bText);
+    if (!isNaN(aDate) && !isNaN(bDate)) return (aDate - bDate) * multiplier;
+    return aText.localeCompare(bText, undefined, { numeric: true }) * multiplier;
+  });
+  rows.forEach(function(row) { tbody.appendChild(row); });
+}
+</script>
+</head>
+<body>
+<a class="back-link" href="index.html">&larr; Back to archive</a>
+<h1>Inventory Failures</h1>
+<div class="summary"><strong>$count computer(s)</strong> could not be inventoried. See details below.</div>
+<table id="fail-table"><thead><tr><th onclick="sortTable('fail-table',0)">Computer</th><th onclick="sortTable('fail-table',1)">Timestamp</th><th onclick="sortTable('fail-table',2)">Error Details</th></tr></thead><tbody>$rows</tbody></table>
+<div class="meta">Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</div>
+</body></html>
+"@
+    }
+
+    $failFile = Join-Path $OutputDir "failures.html"
+    $html | Out-File -FilePath $failFile -Encoding utf8
+    Write-Host "  Failures page saved: $failFile"
+}
+
+# ---------------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------------
+
+Write-Host "Software Inventory V7 - Starting"
+Write-Host "Output path: $OutputPath"
+Write-Host "History path: $HistoryPath"
+Write-Host "Target computers: $($ComputerName -join ', ')"
+Write-Host ""
+
+$failures = @()
+
+foreach ($computer in $ComputerName) {
+    $computer = $computer.Trim()
+    if (-not $computer) { continue }
+
+    Write-Host "========================================"
+    Write-Host "Processing: $computer"
+    Write-Host "========================================"
+
+    # 1. Inventory collection
+    Write-Host "  Collecting software (registry)..."
+    $software = @()
+    try {
+        $software = Get-SoftwareInventory -Computer $computer
+        Write-Host "    Found $($software.Count) software entries"
+    } catch {
+        Write-Warning "    Software inventory failed for $computer : $_"
+    }
+
+    Write-Host "  Collecting updates (WUA)..."
+    $updates = @()
+    try {
+        $updates = Get-InstalledUpdates -Computer $computer
+        Write-Host "    Found $($updates.Count) updates"
+    } catch {
+        Write-Warning "    Update query failed for $computer : $_"
+    }
+
+    # Check if computer failed completely
+    $computerFailed = ($software.Count -eq 0 -and $updates.Count -eq 0)
+
+    if ($computerFailed) {
+        Write-Warning "  $computer failed — no data collected. Skipping snapshot and report."
+        $failures += [PSCustomObject]@{
+            Computer  = $computer
+            Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+            Errors    = "No data collected — verify connectivity and credentials"
+        }
+        Write-Host ""
+        continue
+    }
+
+    # 2. Load previous snapshot
+    Write-Host "  Loading previous snapshot..."
+    $prevSnapshot = Load-HistorySnapshot -Computer $computer -HistoryRoot $HistoryPath
+
+    # 3. Compare snapshots
+    Write-Host "  Comparing snapshots..."
+    $comparison = Compare-Snapshots -CurrentSoftware $software -CurrentUpdates $updates -PreviousSnapshot $prevSnapshot
+    Write-Host "    New software: $($comparison.NewSoftware.Count)"
+    Write-Host "    Removed software: $($comparison.RemovedSoftware.Count)"
+    Write-Host "    New updates: $($comparison.NewUpdates.Count)"
+
+    # 4. Save current snapshot
+    Write-Host "  Saving snapshot..."
+    $snapshotFile = Save-HistorySnapshot -Computer $computer -Software $software -Updates $updates -HistoryRoot $HistoryPath
+
+    # 5. Generate HTML report
+    Write-Host "  Generating HTML report..."
+    $reportFile = New-InventoryHtmlReport -Computer $computer -Software $software -Updates $updates `
+        -Comparison $comparison -PreviousSnapshot $prevSnapshot -OutputDir $OutputPath
+
+    # 6. PassThru
+    if ($PassThru) {
+        [PSCustomObject]@{
+            Computer         = $computer
+            Software         = $software
+            Updates          = $updates
+            Comparison       = $comparison
+            SnapshotFile     = $snapshotFile
+            ReportFile       = $reportFile
+        }
+    }
+
+    Write-Host ""
+}
+
+# Generate combined month page, failures page, and root index
+$now = Get-Date
+$currentYear = $now.ToString('yyyy')
+$currentMonth = $now.ToString('MM')
+Write-Host "Generating combined month report..."
+New-MonthReportHtml -Year $currentYear -Month $currentMonth -OutputDir $OutputPath -HistoryRoot $HistoryPath
+Write-Host "Generating failures page..."
+New-FailuresHtml -Failures $failures -OutputDir $OutputPath
+Write-Host "Generating root website index..."
+New-WebsiteIndexHtml -OutputDir $OutputPath -FailureCount $failures.Count
+
+Write-Host "Done."
