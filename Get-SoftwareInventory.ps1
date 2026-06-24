@@ -1143,11 +1143,12 @@ function New-AllSoftwareHtml {
             $snapDate = $file.BaseName -replace '^snapshot-', ''
             foreach ($sw in $snap.Software) {
                 $allSoftware += [PSCustomObject]@{
-                    Name      = $sw.Name
-                    Version   = $sw.Version
-                    Publisher = $sw.Publisher
-                    Computer  = $snap.Computer
-                    SnapDate  = $snapDate
+                    Name        = $sw.Name
+                    Version     = $sw.Version
+                    Publisher   = $sw.Publisher
+                    InstallDate = if ($sw.InstallDate) { $sw.InstallDate } else { 'Unknown' }
+                    Computer    = $snap.Computer
+                    SnapDate    = $snapDate
                 }
             }
             foreach ($up in $snap.Updates) {
@@ -1172,10 +1173,12 @@ function New-AllSoftwareHtml {
             $compCount = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
             $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.SnapDate } -Descending |
                 Select-Object -First 1
+            $latestInstallDate = $items | Sort-Object { if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate } } -Descending | Select-Object -First 1
             $swEntries += [PSCustomObject]@{
                 Name          = $items[0].Name
                 Version       = $latest.Version
                 Publisher     = $latest.Publisher
+                InstallDate   = $latestInstallDate.InstallDate
                 ComputerList  = $computers
                 ComputerCount = $compCount
             }
@@ -1190,6 +1193,7 @@ function New-AllSoftwareHtml {
 <tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td>
     <td>$(ConvertTo-HtmlEncoded $item.ComputerCount)</td>
     <td>$(ConvertTo-HtmlEncoded $item.ComputerList)</td></tr>
 "@
@@ -1345,8 +1349,9 @@ function sortTable(tableId, col) {
   <th onclick="sortTable('sw-table',0)">Name</th>
   <th onclick="sortTable('sw-table',1)">Version</th>
   <th onclick="sortTable('sw-table',2)">Publisher</th>
-  <th onclick="sortTable('sw-table',3)">Computers</th>
-  <th onclick="sortTable('sw-table',4)">Computer List</th>
+  <th onclick="sortTable('sw-table',3)">Latest Install Date</th>
+  <th onclick="sortTable('sw-table',4)">Computers</th>
+  <th onclick="sortTable('sw-table',5)">Computer List</th>
 </tr></thead><tbody>$swRows</tbody></table>
 
 <h2 class="section-title">Windows Patches</h2>
@@ -1805,7 +1810,7 @@ function Backfill-HistoryMonths {
                 catch { $false }
             }
 
-            Write-Host "      $compFolder month $monthStr: $($monthSw.Count) sw, $($monthPatches.Count) patches"
+            Write-Host "      $compFolder month ${monthStr}: $($monthSw.Count) sw, $($monthPatches.Count) patches"
             if ($monthSw.Count -eq 0 -and $monthPatches.Count -eq 0) {
                 Write-Host "        -> skipping (empty)"
                 continue
