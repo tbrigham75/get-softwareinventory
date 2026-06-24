@@ -946,9 +946,8 @@ function New-MonthReportHtml {
 
     # Filter updates to only those installed in the selected month
     $allUpdates = $allUpdates | Where-Object {
-        $d = "$($_.InstallDate)"
-        $d -ne 'Unknown' -and $d -match '^\d{4}-\d{2}-\d{2}$' -and
-        $d.Substring(0, 7) -eq "$Year-$Month"
+        try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$Month }
+        catch { $false }
     }
     $totalUp = $allUpdates.Count
 
@@ -1229,7 +1228,7 @@ function New-AllSoftwareHtml {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Software &amp; Patches - Global Inventory</title>
+<title>All Software &amp; Patches - Global Inventory</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
   h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
@@ -1319,7 +1318,7 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<h1>Software &amp; Patches</h1>
+<h1>All Software &amp; Patches</h1>
 <div class="summary">
   <div class="summary-grid">
     <div class="summary-item">
@@ -1357,7 +1356,7 @@ function sortTable(tableId, col) {
 
     $outputFile = Join-Path $OutputDir "all-software.html"
     $html | Out-File -FilePath $outputFile -Encoding utf8
-    Write-Host "  Software & Patches page saved: $outputFile"
+    Write-Host "  All Software & Patches page saved: $outputFile"
 }
 
 # ---------------------------------------------------------------
@@ -1511,7 +1510,7 @@ $(
 )
   </div>
   <div style="margin-top: 15px; border-top: 1px solid #e0e0e0; padding-top: 12px;">
-    <a href="all-software.html" class="failures-link" style="background:#e8f0fe;color:#1a3a5c;">Software &amp; Patches</a>
+    <a href="all-software.html" class="failures-link" style="background:#e8f0fe;color:#1a3a5c;">All Software &amp; Patches</a>
     <a href="failures.html" class="failures-link $(if ($FailureCount -gt 0) { 'red' } else { 'green' })">$(if ($FailureCount -gt 0) { "&#9888; View Failures ($FailureCount)" } else { "&#10003; No Failures" })</a>
   </div>
 </div>
@@ -1780,17 +1779,16 @@ function Backfill-HistoryMonths {
             $existing = Get-ChildItem -Path $monthDir -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
             if ($existing.Count -gt 0) { continue }
 
-            $monthEnd = (Get-Date "$Year-$monthStr-01").AddMonths(1).AddDays(-1).ToString('yyyy-MM-dd')
+            $monthEnd = (Get-Date "$Year-$monthStr-01").AddMonths(1).AddDays(-1)
 
             $monthSw = $allSoftware.Values | Where-Object {
-                $d = "$($_.InstallDate)"
-                $d -eq 'Unknown' -or ($d -match '^\d{4}-\d{2}-\d{2}$' -and $d -le $monthEnd)
+                try { $dt = [datetime]$_.InstallDate; $dt -le $monthEnd }
+                catch { $true }
             }
 
             $monthPatches = $allPatches.Values | Where-Object {
-                $d = "$($_.InstallDate)"
-                $d -ne 'Unknown' -and $d -match '^\d{4}-\d{2}-\d{2}$' -and
-                $d.Substring(0, 7) -eq "$Year-$monthStr"
+                try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq $m }
+                catch { $false }
             }
 
             if ($monthSw.Count -eq 0 -and $monthPatches.Count -eq 0) { continue }
