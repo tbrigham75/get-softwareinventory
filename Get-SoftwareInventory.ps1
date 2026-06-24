@@ -768,11 +768,11 @@ function sortTable(tableId, col) {
 <h1>Software Inventory Report</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number">$totalSw</div><div class="label">Installed Software</div></div>
-    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Installed Updates</div></div>
+    <div class="summary-item"><div class="number">$totalSw</div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Windows Patches</div></div>
     <div class="summary-item"><div class="number"><span class="badge-new">+$newSwCount</span></div><div class="label">New Software</div></div>
     <div class="summary-item"><div class="number"><span class="badge-removed">$remSwCount</span></div><div class="label">Removed Software</div></div>
-    <div class="summary-item"><div class="number"><span class="badge-update">+$newUpCount</span></div><div class="label">New Updates</div></div>
+    <div class="summary-item"><div class="number"><span class="badge-update">+$newUpCount</span></div><div class="label">New Patches</div></div>
   </div>
   <div class="meta">Computer: <strong>$Computer</strong> &nbsp;|&nbsp; Generated: $reportDate &nbsp;|&nbsp; Previous snapshot: $prevDate</div>
 </div>
@@ -797,7 +797,7 @@ function sortTable(tableId, col) {
     # New Updates section
     if ($newUpCount -gt 0) {
         $html += @"
-<h2 class="section-title">New Updates <span class="badge-update">$newUpCount</span></h2>
+<h2 class="section-title">New Patches <span class="badge-update">$newUpCount</span></h2>
 <table id="newUp-table"><thead><tr><th onclick="sortTable('newUp-table',0)">Title</th><th onclick="sortTable('newUp-table',1)">Install Date</th></tr></thead><tbody>$newUpRows</tbody></table>
 "@
     }
@@ -936,9 +936,9 @@ function New-MonthReportHtml {
 
     # Filter updates to only those installed in the selected month
     $allUpdates = $allUpdates | Where-Object {
-        $_.InstallDate -ne 'Unknown' -and $_.InstallDate -match "^\d{4}-\d{2}-\d{2}$" -and
-        $_.InstallDate -ge "$Year-$Month-01" -and
-        $_.InstallDate -le "$Year-$Month-31"
+        $d = "$($_.InstallDate)"
+        $d -ne 'Unknown' -and $d -match '^\d{4}-\d{2}-\d{2}$' -and
+        $d.Substring(0, 7) -eq "$Year-$Month"
     }
     $totalUp = $allUpdates.Count
 
@@ -1085,8 +1085,8 @@ function sortTable(tableId, col) {
 <div class="summary">
   <div class="summary-grid">
     <div class="summary-item"><div class="number">$compCount</div><div class="label">Computers</div></div>
-    <div class="summary-item"><div class="number">$totalSw</div><div class="label">Software Entries</div></div>
-    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Updates</div></div>
+    <div class="summary-item"><div class="number">$totalSw</div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Windows Patches</div></div>
   </div>
   <div class="meta">Computers: $compList &nbsp;|&nbsp; Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
 </div>
