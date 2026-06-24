@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Software Inventory and Update Reporting Script V7
+    Software Inventory and Update Reporting Script
 .DESCRIPTION
     Collects installed software (from registry) and installed updates (from WUA),
     saves persistent monthly JSON snapshots, and generates browsable HTML reports
@@ -13,12 +13,16 @@
     Root folder for historical snapshots. Defaults to .\History.
 .PARAMETER PassThru
     Return inventory objects to the pipeline instead of (or in addition to) saving files.
+.PARAMETER ExportCsv
+    Export software and updates to CSV files alongside HTML reports.
 .EXAMPLE
-    .\Get-SoftwareInventoryV7.ps1
+    .\Get-SoftwareInventory.ps1
 .EXAMPLE
-    .\Get-SoftwareInventoryV7.ps1 -ComputerName SRV01, SRV02
+    .\Get-SoftwareInventory.ps1 -ComputerName SRV01, SRV02
 .EXAMPLE
-    .\Get-SoftwareInventoryV7.ps1 -ComputerName localhost -OutputPath C:\Reports
+    .\Get-SoftwareInventory.ps1 -ComputerName localhost -OutputPath C:\Reports
+.EXAMPLE
+    .\Get-SoftwareInventory.ps1 -ComputerName SRV01 -ExportCsv
 #>
 
 [CmdletBinding()]
@@ -26,7 +30,8 @@ param(
     [string[]]$ComputerName,
     [string]$OutputPath,
     [string]$HistoryPath,
-    [switch]$PassThru
+    [switch]$PassThru,
+    [switch]$ExportCsv
 )
 
 # ---------------------------------------------------------------
@@ -43,6 +48,11 @@ function Get-ScriptDirectory {
 }
 
 $scriptDir = Get-ScriptDirectory
+$scriptVersion = '7.0'
+
+# Retry constants for remote connections
+$script:RetryCount = 2
+$script:RetryDelayMs = 2000
 
 # HTML-encode helper (no external dependency)
 function ConvertTo-HtmlEncoded {
@@ -93,16 +103,25 @@ function Get-SoftwareInventory {
     if ($isLocal) {
         Get-LocalSoftware
     } else {
-        try {
-            $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
-            $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalSoftware} -ErrorAction Stop
-            Remove-PSSession $session
-            $result
-        } catch {
-            Write-Warning "Failed to connect to $Computer via WinRM: $_"
-            Write-Warning "Attempting remote registry fallback..."
-            Get-RemoteRegistrySoftware $Computer
+        $result = $null
+        for ($attempt = 1; $attempt -le $script:RetryCount; $attempt++) {
+            try {
+                $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
+                $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalSoftware} -ErrorAction Stop
+                Remove-PSSession $session
+                break
+            } catch {
+                if ($attempt -lt $script:RetryCount) {
+                    Write-Warning "  WinRM attempt $attempt failed for $Computer, retrying in $($script:RetryDelayMs)ms..."
+                    Start-Sleep -Milliseconds $script:RetryDelayMs
+                } else {
+                    Write-Warning "Failed to connect to $Computer via WinRM after $script:RetryCount attempts: $_"
+                    Write-Warning "Attempting remote registry fallback..."
+                    $result = Get-RemoteRegistrySoftware $Computer
+                }
+            }
         }
+        $result
     }
 }
 
@@ -219,15 +238,23 @@ function Get-InstalledUpdates {
     if ($isLocal) {
         Get-LocalUpdates
     } else {
-        try {
-            $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
-            $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalUpdates} -ErrorAction Stop
-            Remove-PSSession $session
-            $result
-        } catch {
-            Write-Warning "Failed to get updates from $Computer via WinRM: $_"
-            @()
+        $result = @()
+        for ($attempt = 1; $attempt -le $script:RetryCount; $attempt++) {
+            try {
+                $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
+                $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalUpdates} -ErrorAction Stop
+                Remove-PSSession $session
+                break
+            } catch {
+                if ($attempt -lt $script:RetryCount) {
+                    Write-Warning "  WinRM attempt $attempt failed for $Computer (updates), retrying..."
+                    Start-Sleep -Milliseconds $script:RetryDelayMs
+                } else {
+                    Write-Warning "Failed to get updates from $Computer via WinRM after $script:RetryCount attempts: $_"
+                }
+            }
         }
+        $result
     }
 }
 
@@ -309,7 +336,7 @@ function Save-HistorySnapshot {
     $snapshotFile = Join-Path $snapshotDir "snapshot-$timestamp.json"
 
     $snapshot = @{
-        ScriptVersion = '7.0'
+        ScriptVersion = $scriptVersion
         Computer      = $Computer
         Date          = $now.ToString('yyyy-MM-dd HH:mm:ss')
         SoftwareCount = $Software.Count
@@ -555,10 +582,71 @@ function New-InventoryHtmlReport {
   .badge-new { display: inline-block; background: #2e7d32; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
   .badge-removed { display: inline-block; background: #c62828; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
   .badge-update { display: inline-block; background: #1565c0; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
+  .search-box:focus { outline: none; border-color: #1a3a5c; box-shadow: 0 0 4px rgba(26,58,92,.3); }
   a.back-link { color: #1a3a5c; text-decoration: none; }
   a.back-link:hover { text-decoration: underline; }
+  .theme-toggle { float: right; background: none; border: 1px solid #1a3a5c; color: #1a3a5c; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { background: #1a3a5c; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
+    body.theme-auto h1, body.theme-auto h2, body.theme-auto h3 { color: #80b0e0; }
+    body.theme-auto .summary { background: #16213e; }
+    body.theme-auto .summary-item { background: #0f3460; }
+    body.theme-auto .summary-item .number { color: #80b0e0; }
+    body.theme-auto .summary-item .label { color: #a0c0e0; }
+    body.theme-auto .meta { color: #888; }
+    body.theme-auto table { background: #16213e; }
+    body.theme-auto th { background: #0f3460; }
+    body.theme-auto th:hover { background: #1a4a7a; }
+    body.theme-auto td { border-bottom: 1px solid #2a3a5e; }
+    body.theme-auto tr:hover td { background: #1a2a4e; }
+    body.theme-auto .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+    body.theme-auto .search-box:focus { border-color: #80b0e0; }
+  }
+  body.dark { background: #1a1a2e; color: #e0e0e0; }
+  body.dark h1, body.dark h2, body.dark h3 { color: #80b0e0; }
+  body.dark .summary { background: #16213e; }
+  body.dark .summary-item { background: #0f3460; }
+  body.dark .summary-item .number { color: #80b0e0; }
+  body.dark .summary-item .label { color: #a0c0e0; }
+  body.dark .meta { color: #888; }
+  body.dark table { background: #16213e; }
+  body.dark th { background: #0f3460; }
+  body.dark th:hover { background: #1a4a7a; }
+  body.dark td { border-bottom: 1px solid #2a3a5e; }
+  body.dark tr:hover td { background: #1a2a4e; }
+  body.dark .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+  body.dark .search-box:focus { border-color: #80b0e0; }
 </style>
 <script>
+function toggleTheme() {
+  var body = document.body;
+  if (body.classList.contains('dark')) {
+    body.classList.remove('dark');
+    localStorage.setItem('theme', 'light');
+  } else {
+    body.classList.add('dark');
+    localStorage.setItem('theme', 'dark');
+  }
+}
+(function() {
+  var saved = localStorage.getItem('theme');
+  if (saved === 'dark') document.body.classList.add('dark');
+  if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
+})();
+function filterTable(inputId, tableId) {
+  var input = document.getElementById(inputId);
+  var filter = input.value.toLowerCase();
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr');
+  for (var i = 0; i < rows.length; i++) {
+    var text = rows[i].textContent.toLowerCase();
+    rows[i].style.display = text.indexOf(filter) > -1 ? '' : 'none';
+  }
+}
 function sortTable(tableId, col) {
   var table = document.getElementById(tableId);
   var tbody = table.querySelector('tbody');
@@ -580,6 +668,7 @@ function sortTable(tableId, col) {
 </script>
 </head>
 <body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
 <a class="back-link" href="../../../index.html">&larr; Back to archive</a>
 <h1>Software Inventory Report</h1>
 <div class="summary">
@@ -621,12 +710,14 @@ function sortTable(tableId, col) {
     # All Software
     $html += @"
 <h2 class="section-title">All Installed Software <span class="badge-new">$totalSw</span></h2>
+<input type="text" id="allSw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('allSw-filter','allSw-table')">
 <table id="allSw-table"><thead><tr><th onclick="sortTable('allSw-table',0)">Name</th><th onclick="sortTable('allSw-table',1)">Version</th><th onclick="sortTable('allSw-table',2)">Publisher</th><th onclick="sortTable('allSw-table',3)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
 "@
 
     # All Updates
     $html += @"
 <h2 class="section-title">All Installed Updates <span class="badge-update">$totalUp</span></h2>
+<input type="text" id="allUp-filter" class="search-box" placeholder="Filter updates..." onkeyup="filterTable('allUp-filter','allUp-table')">
 <table id="allUp-table"><thead><tr><th onclick="sortTable('allUp-table',0)">Title</th><th onclick="sortTable('allUp-table',1)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
 </body></html>
 "@
@@ -642,6 +733,40 @@ function sortTable(tableId, col) {
     $html | Out-File -FilePath $reportFile -Encoding utf8
     Write-Host "  Report saved: $reportFile"
     $reportFile
+}
+
+# ---------------------------------------------------------------
+# New-CsvExport
+# Exports software and updates data to CSV files alongside report output.
+# ---------------------------------------------------------------
+function New-CsvExport {
+    param(
+        [string]$Computer,
+        [PSObject[]]$Software,
+        [PSObject[]]$Updates,
+        [string]$OutputDir
+    )
+
+    $now = Get-Date
+    $year = $now.ToString('yyyy')
+    $month = $now.ToString('MM')
+    $timestamp = $now.ToString('yyyyMMdd-HHmm')
+
+    $compFolder = $Computer -replace '[/\\:*?"<>|]', '_'
+    $outDir = [System.IO.Path]::Combine($OutputDir, $compFolder, $year, $month)
+    if (-not (Test-Path $outDir)) {
+        New-Item -Path $outDir -ItemType Directory -Force | Out-Null
+    }
+
+    $swFile = Join-Path $outDir "software-$timestamp.csv"
+    $Software | Select-Object Name, Version, Publisher, InstallDate, Architecture |
+        Export-Csv -Path $swFile -NoTypeInformation -Encoding utf8
+    Write-Host "  CSV saved: $swFile"
+
+    $upFile = Join-Path $outDir "updates-$timestamp.csv"
+    $Updates | Select-Object Title, InstallDate, Result |
+        Export-Csv -Path $upFile -NoTypeInformation -Encoding utf8
+    Write-Host "  CSV saved: $upFile"
 }
 
 # ---------------------------------------------------------------
@@ -767,10 +892,71 @@ function New-MonthReportHtml {
   td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
   tr:hover td { background: #f0f5ff; }
   .section-title { margin: 25px 0 10px 0; }
+  .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
+  .search-box:focus { outline: none; border-color: #1a3a5c; box-shadow: 0 0 4px rgba(26,58,92,.3); }
   a.back-link { color: #1a3a5c; text-decoration: none; }
   a.back-link:hover { text-decoration: underline; }
+  .theme-toggle { float: right; background: none; border: 1px solid #1a3a5c; color: #1a3a5c; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { background: #1a3a5c; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
+    body.theme-auto h1, body.theme-auto h2, body.theme-auto h3 { color: #80b0e0; }
+    body.theme-auto .summary { background: #16213e; }
+    body.theme-auto .summary-item { background: #0f3460; }
+    body.theme-auto .summary-item .number { color: #80b0e0; }
+    body.theme-auto .summary-item .label { color: #a0c0e0; }
+    body.theme-auto .meta { color: #888; }
+    body.theme-auto table { background: #16213e; }
+    body.theme-auto th { background: #0f3460; }
+    body.theme-auto th:hover { background: #1a4a7a; }
+    body.theme-auto td { border-bottom: 1px solid #2a3a5e; }
+    body.theme-auto tr:hover td { background: #1a2a4e; }
+    body.theme-auto .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+    body.theme-auto .search-box:focus { border-color: #80b0e0; }
+  }
+  body.dark { background: #1a1a2e; color: #e0e0e0; }
+  body.dark h1, body.dark h2, body.dark h3 { color: #80b0e0; }
+  body.dark .summary { background: #16213e; }
+  body.dark .summary-item { background: #0f3460; }
+  body.dark .summary-item .number { color: #80b0e0; }
+  body.dark .summary-item .label { color: #a0c0e0; }
+  body.dark .meta { color: #888; }
+  body.dark table { background: #16213e; }
+  body.dark th { background: #0f3460; }
+  body.dark th:hover { background: #1a4a7a; }
+  body.dark td { border-bottom: 1px solid #2a3a5e; }
+  body.dark tr:hover td { background: #1a2a4e; }
+  body.dark .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+  body.dark .search-box:focus { border-color: #80b0e0; }
 </style>
 <script>
+function toggleTheme() {
+  var body = document.body;
+  if (body.classList.contains('dark')) {
+    body.classList.remove('dark');
+    localStorage.setItem('theme', 'light');
+  } else {
+    body.classList.add('dark');
+    localStorage.setItem('theme', 'dark');
+  }
+}
+(function() {
+  var saved = localStorage.getItem('theme');
+  if (saved === 'dark') document.body.classList.add('dark');
+  if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
+})();
+function filterTable(inputId, tableId) {
+  var input = document.getElementById(inputId);
+  var filter = input.value.toLowerCase();
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr');
+  for (var i = 0; i < rows.length; i++) {
+    var text = rows[i].textContent.toLowerCase();
+    rows[i].style.display = text.indexOf(filter) > -1 ? '' : 'none';
+  }
+}
 function sortTable(tableId, col) {
   var table = document.getElementById(tableId);
   var tbody = table.querySelector('tbody');
@@ -792,6 +978,7 @@ function sortTable(tableId, col) {
 </script>
 </head>
 <body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
 <a class="back-link" href="../../index.html">&larr; Back to archive</a>
 <h1>$monthName $Year &mdash; Combined Inventory</h1>
 <div class="summary">
@@ -804,9 +991,11 @@ function sortTable(tableId, col) {
 </div>
 
 <h2 class="section-title">Installed Software</h2>
+<input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
 <table id="sw-table"><thead><tr><th onclick="sortTable('sw-table',0)">Hostname</th><th onclick="sortTable('sw-table',1)">Name</th><th onclick="sortTable('sw-table',2)">Version</th><th onclick="sortTable('sw-table',3)">Publisher</th><th onclick="sortTable('sw-table',4)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
 
 <h2 class="section-title">Installed Updates</h2>
+<input type="text" id="up-filter" class="search-box" placeholder="Filter updates..." onkeyup="filterTable('up-filter','up-table')">
 <table id="up-table"><thead><tr><th onclick="sortTable('up-table',0)">Hostname</th><th onclick="sortTable('up-table',1)">Title</th><th onclick="sortTable('up-table',2)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
 </body></html>
 "@
@@ -916,9 +1105,47 @@ function New-WebsiteIndexHtml {
   .failures-link.green:hover { background: #c8e6c9; }
   .failures-link.red { background: #ffebee; color: #c62828; }
   .failures-link.red:hover { background: #ffcdd2; }
+  .theme-toggle { float: right; background: none; border: 1px solid #1a3a5c; color: #1a3a5c; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { background: #1a3a5c; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
+    body.theme-auto h1 { color: #80b0e0; }
+    body.theme-auto .year-group { background: #16213e; }
+    body.theme-auto .month-link { background: #0f3460; color: #80b0e0; }
+    body.theme-auto .month-link:hover { background: #1a4a7a; }
+    body.theme-auto .meta { color: #888; }
+    body.theme-auto .failures-link.green { background: #1b5e20; color: #a5d6a7; }
+    body.theme-auto .failures-link.red { background: #b71c1c; color: #ffcdd2; }
+  }
+  body.dark { background: #1a1a2e; color: #e0e0e0; }
+  body.dark h1 { color: #80b0e0; }
+  body.dark .year-group { background: #16213e; }
+  body.dark .month-link { background: #0f3460; color: #80b0e0; }
+  body.dark .month-link:hover { background: #1a4a7a; }
+  body.dark .meta { color: #888; }
+  body.dark .failures-link.green { background: #1b5e20; color: #a5d6a7; }
+  body.dark .failures-link.red { background: #b71c1c; color: #ffcdd2; }
 </style>
+<script>
+function toggleTheme() {
+  var body = document.body;
+  if (body.classList.contains('dark')) {
+    body.classList.remove('dark');
+    localStorage.setItem('theme', 'light');
+  } else {
+    body.classList.add('dark');
+    localStorage.setItem('theme', 'dark');
+  }
+}
+(function() {
+  var saved = localStorage.getItem('theme');
+  if (saved === 'dark') document.body.classList.add('dark');
+  if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
+})();
+</script>
 </head>
 <body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
 <h1>Software Inventory Archive</h1>
 
 <div class="year-group">
@@ -975,9 +1202,37 @@ function New-FailuresHtml {
   a.back-link { color: #1a3a5c; text-decoration: none; }
   a.back-link:hover { text-decoration: underline; }
   .meta { font-size: 13px; color: #888; margin-top: 20px; }
+  .theme-toggle { float: right; background: none; border: 1px solid #2e7d32; color: #2e7d32; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { background: #2e7d32; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
+    body.theme-auto h1 { color: #81c784; }
+    body.theme-auto .success { background: #1b5e20; color: #a5d6a7; }
+  }
+  body.dark { background: #1a1a2e; color: #e0e0e0; }
+  body.dark h1 { color: #81c784; }
+  body.dark .success { background: #1b5e20; color: #a5d6a7; }
 </style>
+<script>
+function toggleTheme() {
+  var body = document.body;
+  if (body.classList.contains('dark')) {
+    body.classList.remove('dark');
+    localStorage.setItem('theme', 'light');
+  } else {
+    body.classList.add('dark');
+    localStorage.setItem('theme', 'dark');
+  }
+}
+(function() {
+  var saved = localStorage.getItem('theme');
+  if (saved === 'dark') document.body.classList.add('dark');
+  if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
+})();
+</script>
 </head>
 <body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
 <a class="back-link" href="index.html">&larr; Back to archive</a>
 <h1>Inventory Failures</h1>
 <div class="success">All computers were successfully inventoried.</div>
@@ -1015,9 +1270,60 @@ function New-FailuresHtml {
   a.back-link { color: #1a3a5c; text-decoration: none; }
   a.back-link:hover { text-decoration: underline; }
   .meta { font-size: 13px; color: #888; margin-top: 20px; }
-  .error-detail { font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+   .error-detail { font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+   .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
+   .search-box:focus { outline: none; border-color: #c62828; box-shadow: 0 0 4px rgba(198,40,40,.3); }
+   .theme-toggle { float: right; background: none; border: 1px solid #c62828; color: #c62828; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+   .theme-toggle:hover { background: #c62828; color: #fff; }
+   @media (prefers-color-scheme: dark) {
+     body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
+     body.theme-auto h1 { color: #e57373; }
+     body.theme-auto .summary { background: #16213e; }
+     body.theme-auto table { background: #16213e; }
+     body.theme-auto th { background: #b71c1c; }
+     body.theme-auto th:hover { background: #c62828; }
+     body.theme-auto td { border-bottom: 1px solid #2a3a5e; }
+     body.theme-auto tr:hover td { background: #1a2a4e; }
+     body.theme-auto .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+   }
+   body.dark { background: #1a1a2e; color: #e0e0e0; }
+   body.dark h1 { color: #e57373; }
+   body.dark .summary { background: #16213e; }
+   body.dark table { background: #16213e; }
+   body.dark th { background: #b71c1c; }
+   body.dark th:hover { background: #c62828; }
+   body.dark td { border-bottom: 1px solid #2a3a5e; }
+   body.dark tr:hover td { background: #1a2a4e; }
+   body.dark .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
 </style>
 <script>
+function toggleTheme() {
+  var body = document.body;
+  if (body.classList.contains('dark')) {
+    body.classList.remove('dark');
+    localStorage.setItem('theme', 'light');
+  } else {
+    body.classList.add('dark');
+    localStorage.setItem('theme', 'dark');
+  }
+}
+(function() {
+  var saved = localStorage.getItem('theme');
+  if (saved === 'dark') document.body.classList.add('dark');
+  if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
+})();
+function filterTable(inputId, tableId) {
+  var input = document.getElementById(inputId);
+  var filter = input.value.toLowerCase();
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr');
+  for (var i = 0; i < rows.length; i++) {
+    var text = rows[i].textContent.toLowerCase();
+    rows[i].style.display = text.indexOf(filter) > -1 ? '' : 'none';
+  }
+}
 function sortTable(tableId, col) {
   var table = document.getElementById(tableId);
   var tbody = table.querySelector('tbody');
@@ -1039,9 +1345,11 @@ function sortTable(tableId, col) {
 </script>
 </head>
 <body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
 <a class="back-link" href="index.html">&larr; Back to archive</a>
 <h1>Inventory Failures</h1>
 <div class="summary"><strong>$count computer(s)</strong> could not be inventoried. See details below.</div>
+<input type="text" id="fail-filter" class="search-box" placeholder="Filter failures..." onkeyup="filterTable('fail-filter','fail-table')">
 <table id="fail-table"><thead><tr><th onclick="sortTable('fail-table',0)">Computer</th><th onclick="sortTable('fail-table',1)">Timestamp</th><th onclick="sortTable('fail-table',2)">Error Details</th></tr></thead><tbody>$rows</tbody></table>
 <div class="meta">Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</div>
 </body></html>
@@ -1125,6 +1433,12 @@ foreach ($computer in $ComputerName) {
     Write-Host "  Generating HTML report..."
     $reportFile = New-InventoryHtmlReport -Computer $computer -Software $software -Updates $updates `
         -Comparison $comparison -PreviousSnapshot $prevSnapshot -OutputDir $OutputPath
+
+    # 5b. Export CSV (optional)
+    if ($ExportCsv) {
+        Write-Host "  Exporting CSV..."
+        New-CsvExport -Computer $computer -Software $software -Updates $updates -OutputDir $OutputPath
+    }
 
     # 6. PassThru
     if ($PassThru) {

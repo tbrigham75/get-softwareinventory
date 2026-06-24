@@ -12,7 +12,7 @@ Collects installed software and Windows updates from local/remote machines via r
 ## Usage
 
 ```
-.\Get-SoftwareInventoryV7.ps1 [-ComputerName "host1","host2"] [-OutputPath <path>] [-HistoryPath <path>] [-PassThru]
+.\Get-SoftwareInventory.ps1 [-ComputerName "host1","host2"] [-OutputPath <path>] [-HistoryPath <path>] [-PassThru] [-ExportCsv]
 ```
 
 | Parameter     | Description |
@@ -21,6 +21,7 @@ Collects installed software and Windows updates from local/remote machines via r
 | `-OutputPath`   | Root for HTML reports (default: `.\Output`) |
 | `-HistoryPath`  | Root for JSON snapshots (default: `.\History`) |
 | `-PassThru`     | Return inventory objects to the pipeline |
+| `-ExportCsv`    | Export software and updates to CSV files alongside HTML |
 
 By default the script reads computer names from `hostnames.txt` (one per line).
 
@@ -52,7 +53,7 @@ Output\YYYY\MM\index.html                     Combined month view — all hosts 
 
 ## Limitations
 
-- Only 64-bit registry view is checked; 32-bit software on 64-bit OS (Wow6432Node) is not enumerated
+- 32-bit software on 64-bit OS (Wow6432Node) is enumerated; however, per-user (HKCU) software is only collected locally, not via remote registry fallback
 - Remote registry requires the "Remote Registry" service to be running on targets
 - Updates are gathered via the local WUA agent; the target machine's WSUS/SUS settings determine which updates are reported as installed
 
@@ -60,7 +61,7 @@ Output\YYYY\MM\index.html                     Combined month view — all hosts 
 
 | File | Purpose |
 |------|---------|
-| `Get-SoftwareInventoryV7.ps1` | Main script (active version) |
+| `Get-SoftwareInventory.ps1` | Main script (active version) |
 | `hostnames.txt` | Default list of computers to inventory |
 | `History\` | Archived JSON snapshots (auto-created) |
 | `Output\` | Generated HTML reports (auto-created) |
