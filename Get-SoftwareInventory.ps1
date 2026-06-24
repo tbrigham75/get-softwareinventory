@@ -1107,6 +1107,182 @@ function sortTable(tableId, col) {
 }
 
 # ---------------------------------------------------------------
+# New-AllSoftwareHtml
+# Generates Output\all-software.html aggregating every software
+# entry from all historical snapshots, deduplicated by name.
+# ---------------------------------------------------------------
+function New-AllSoftwareHtml {
+    param(
+        [string]$HistoryRoot,
+        [string]$OutputDir
+    )
+
+    $snapshotFiles = Get-ChildItem -Path $HistoryRoot -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+    if ($snapshotFiles.Count -eq 0) { return }
+
+    $allSoftware = @()
+    foreach ($file in $snapshotFiles) {
+        try {
+            $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
+            $snapDate = $file.BaseName -replace '^snapshot-', ''
+            foreach ($sw in $snap.Software) {
+                $allSoftware += [PSCustomObject]@{
+                    Name      = $sw.Name
+                    Version   = $sw.Version
+                    Publisher = $sw.Publisher
+                    Computer  = $snap.Computer
+                    SnapDate  = $snapDate
+                }
+            }
+        } catch {
+            # skip corrupt snapshots
+        }
+    }
+
+    if ($allSoftware.Count -eq 0) { return }
+
+    $grouped = $allSoftware | Group-Object -Property { ($_.Name -replace '\s+', ' ').Trim().ToLower() }
+
+    $entries = @()
+    foreach ($g in $grouped) {
+        $items = $g.Group
+        $computers = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object) -join ', '
+        $compCount = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
+        $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.SnapDate } -Descending |
+            Select-Object -First 1
+        $entries += [PSCustomObject]@{
+            Name          = $items[0].Name
+            Version       = $latest.Version
+            Publisher     = $latest.Publisher
+            ComputerList  = $computers
+            ComputerCount = $compCount
+        }
+    }
+
+    $entries = $entries | Sort-Object Name
+    $totalSw = $entries.Count
+
+    $swRows = ''
+    foreach ($item in $entries) {
+        $swRows += @"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.ComputerCount)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.ComputerList)</td></tr>
+"@
+    }
+
+    $now = Get-Date
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>All Software - Historical Inventory</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
+  .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
+  .meta { font-size: 13px; color: #888; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
+  th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
+  th:hover { background: #2a5a8c; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; word-break: break-word; }
+  tr:hover td { background: #f0f5ff; }
+  .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
+  .search-box:focus { outline: none; border-color: #1a3a5c; box-shadow: 0 0 4px rgba(26,58,92,.3); }
+  a.back-link { color: #1a3a5c; text-decoration: none; }
+  a.back-link:hover { text-decoration: underline; }
+  .theme-toggle { float: right; background: none; border: 1px solid #1a3a5c; color: #1a3a5c; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { background: #1a3a5c; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
+    body.theme-auto h1 { color: #80b0e0; }
+    body.theme-auto .summary { background: #16213e; }
+    body.theme-auto table { background: #16213e; }
+    body.theme-auto th { background: #0f3460; }
+    body.theme-auto td { border-bottom: 1px solid #2a2a4e; }
+    body.theme-auto tr:hover td { background: #1a2a4e; }
+    body.theme-auto .meta { color: #888; }
+  }
+  body.dark { background: #1a1a2e; color: #e0e0e0; }
+  body.dark h1 { color: #80b0e0; }
+  body.dark .summary { background: #16213e; }
+  body.dark table { background: #16213e; }
+  body.dark th { background: #0f3460; }
+  body.dark td { border-bottom: 1px solid #2a2a4e; }
+  body.dark tr:hover td { background: #1a2a4e; }
+  body.dark .meta { color: #888; }
+</style>
+<script>
+function toggleTheme() {
+  var body = document.body;
+  if (body.classList.contains('dark')) { body.classList.remove('dark'); localStorage.setItem('theme', 'light'); }
+  else { body.classList.add('dark'); localStorage.setItem('theme', 'dark'); }
+}
+(function() {
+  var saved = localStorage.getItem('theme');
+  if (saved === 'dark') document.body.classList.add('dark');
+  if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
+})();
+function filterTable(inputId, tableId) {
+  var input = document.getElementById(inputId);
+  var filter = input.value.toUpperCase();
+  var table = document.getElementById(tableId);
+  var rows = table.getElementsByTagName('tr');
+  for (var i = 1; i < rows.length; i++) {
+    var cells = rows[i].getElementsByTagName('td');
+    var show = false;
+    for (var j = 0; j < cells.length; j++) {
+      if (cells[j].textContent.toUpperCase().indexOf(filter) > -1) { show = true; break; }
+    }
+    rows[i].style.display = show ? '' : 'none';
+  }
+}
+function sortTable(tableId, col) {
+  var table = document.getElementById(tableId);
+  var switching = true;
+  var dir = 'asc';
+  while (switching) {
+    switching = false;
+    var rows = table.rows;
+    for (var i = 1; i < rows.length - 1; i++) {
+      var x = rows[i].getElementsByTagName('td')[col];
+      var y = rows[i + 1].getElementsByTagName('td')[col];
+      var cmp = dir === 'asc' ? x.textContent.localeCompare(y.textContent) : y.textContent.localeCompare(x.textContent);
+      if (cmp > 0) { rows[i].parentNode.insertBefore(rows[i + 1], rows[i]); switching = true; break; }
+    }
+    if (!switching && dir === 'asc') { dir = 'desc'; switching = true; }
+  }
+}
+</script>
+</head>
+<body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
+<h1>All Software (Historical)</h1>
+<div class="summary">
+  <strong>$totalSw</strong> unique software titles found across all historical snapshots.
+  <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; <a href="index.html" class="back-link">&larr; Back to Archive</a></div>
+</div>
+<input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
+<table id="sw-table"><thead><tr>
+  <th onclick="sortTable('sw-table',0)">Name</th>
+  <th onclick="sortTable('sw-table',1)">Version</th>
+  <th onclick="sortTable('sw-table',2)">Publisher</th>
+  <th onclick="sortTable('sw-table',3)">Computers</th>
+  <th onclick="sortTable('sw-table',4)">Computer List</th>
+</tr></thead><tbody>$swRows</tbody></table>
+</body></html>
+"@
+
+    $outputFile = Join-Path $OutputDir "all-software.html"
+    $html | Out-File -FilePath $outputFile -Encoding utf8
+    Write-Host "  All Software page saved: $outputFile"
+}
+
+# ---------------------------------------------------------------
 # New-WebsiteIndexHtml
 # Generates the root Output\index.html with year/month navigation
 # linking to combined month index pages across all computers.
@@ -1257,6 +1433,7 @@ $(
 )
   </div>
   <div style="margin-top: 15px; border-top: 1px solid #e0e0e0; padding-top: 12px;">
+    <a href="all-software.html" class="failures-link" style="background:#e8f0fe;color:#1a3a5c;">View All Software</a>
     <a href="failures.html" class="failures-link $(if ($FailureCount -gt 0) { 'red' } else { 'green' })">$(if ($FailureCount -gt 0) { "&#9888; View Failures ($FailureCount)" } else { "&#10003; No Failures" })</a>
   </div>
 </div>
@@ -1644,6 +1821,8 @@ Write-Host "Generating combined month report..."
 New-MonthReportHtml -Year $currentYear -Month $currentMonth -OutputDir $OutputPath -HistoryRoot $HistoryPath
 Write-Host "Generating failures page..."
 New-FailuresHtml -Failures $failures -OutputDir $OutputPath
+Write-Host "Generating All Software page..."
+New-AllSoftwareHtml -HistoryRoot $HistoryPath -OutputDir $OutputPath
 Write-Host "Generating root website index..."
 New-WebsiteIndexHtml -OutputDir $OutputPath -FailureCount $failures.Count
 
