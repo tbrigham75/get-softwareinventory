@@ -942,6 +942,12 @@ function New-MonthReportHtml {
 
     $computersFound = $computersFound | Select-Object -Unique
     $compCount = $computersFound.Count
+
+    # Filter software to only those installed in the selected month
+    $allSoftware = $allSoftware | Where-Object {
+        try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$Month }
+        catch { $false }
+    }
     $totalSw = $allSoftware.Count
 
     # Filter updates to only those installed in the selected month
@@ -1394,19 +1400,19 @@ function New-WebsiteIndexHtml {
         }
     }
 
-    # If no report.html files found, try finding month index files
-    if ($years.Count -eq 0) {
-        $monthIndexes = Get-ChildItem -Path $OutputDir -Recurse -Filter 'index.html' -ErrorAction SilentlyContinue |
-            Where-Object { $_.Directory.Parent.Name -match '^\d{4}$' } |
-            Sort-Object FullName
-        foreach ($r in $monthIndexes) {
-            $rel = $r.Directory.FullName.Substring($OutputDirNorm.Length + 1)
-            $parts = $rel -split '[/\\]'
-            if ($parts.Count -ge 2) {
-                $y = $parts[0]
-                $m = $parts[1]
-                if (-not $years[$y]) { $years[$y] = @{} }
-                if (-not $years[$y][$m]) { $years[$y][$m] = @() }
+    # Also add months from combined index files (backfilled or report-only months)
+    $monthIndexes = Get-ChildItem -Path $OutputDir -Recurse -Filter 'index.html' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Parent.Name -match '^\d{4}$' } |
+        Sort-Object FullName
+    foreach ($r in $monthIndexes) {
+        $rel = $r.Directory.FullName.Substring($OutputDirNorm.Length + 1)
+        $parts = $rel -split '[/\\]'
+        if ($parts.Count -ge 2) {
+            $y = $parts[0]
+            $m = $parts[1]
+            if (-not $years[$y]) { $years[$y] = @{} }
+            if (-not $years[$y][$m]) { $years[$y][$m] = @() }
+            if ($years[$y][$m].Count -eq 0) {
                 $years[$y][$m] += @{ Computer = ''; Path = $r.FullName }
             }
         }
@@ -1425,8 +1431,10 @@ function New-WebsiteIndexHtml {
                 '09' { 'September' }; '10' { 'October' }; '11' { 'November' }; '12' { 'December' }
                 default { $m }
             }
-            $compCount = ($years[$y][$m] | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
-            $navHtml += "<a href='./$y/$m/index.html' class='month-link'>$monthName $y ($compCount computers)</a>`n"
+            $compEntries = $years[$y][$m] | Where-Object { $_.Computer -ne '' }
+            $compCount = ($compEntries | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
+            $compLabel = if ($compCount -gt 0) { " ($compCount computers)" } else { '' }
+            $navHtml += "<a href='./$y/$m/index.html' class='month-link'>$monthName $y$compLabel</a>`n"
         }
         $navHtml += "</div></div>"
     }
