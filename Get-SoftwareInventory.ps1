@@ -1118,7 +1118,7 @@ function sortTable(tableId, col) {
 
     $indexFile = Join-Path $monthDir "index.html"
     $html | Out-File -FilePath $indexFile -Encoding utf8
-    Write-Host "  Month index saved: $indexFile"
+    Write-Host "  Month index saved: $indexFile ($totalSw sw, $totalUp patches)"
 }
 
 # ---------------------------------------------------------------
@@ -1404,6 +1404,9 @@ function New-WebsiteIndexHtml {
     $monthIndexes = Get-ChildItem -Path $OutputDir -Recurse -Filter 'index.html' -ErrorAction SilentlyContinue |
         Where-Object { $_.Directory.Parent.Name -match '^\d{4}$' } |
         Sort-Object FullName
+    Write-Host "  Found $($monthIndexes.Count) month index.html files"
+    foreach ($mi in $monthIndexes) { Write-Host "    - $($mi.FullName)" }
+    Write-Host "  Years before merge: $($years.Keys -join ', ')"
     foreach ($r in $monthIndexes) {
         $rel = $r.Directory.FullName.Substring($OutputDirNorm.Length + 1)
         $parts = $rel -split '[/\\]'
@@ -1417,6 +1420,9 @@ function New-WebsiteIndexHtml {
             }
         }
     }
+
+    Write-Host "  Years after merge: $($years.Keys -join ', ')"
+    $years.Keys | Sort-Object | ForEach-Object { $y = $_; $years[$y].Keys | Sort-Object | ForEach-Object { Write-Host "    $y-$_" } }
 
     # Build nav HTML
     $navHtml = ''
@@ -1799,7 +1805,11 @@ function Backfill-HistoryMonths {
                 catch { $false }
             }
 
-            if ($monthSw.Count -eq 0 -and $monthPatches.Count -eq 0) { continue }
+            Write-Host "      $compFolder month $monthStr: $($monthSw.Count) sw, $($monthPatches.Count) patches"
+            if ($monthSw.Count -eq 0 -and $monthPatches.Count -eq 0) {
+                Write-Host "        -> skipping (empty)"
+                continue
+            }
 
             Save-HistorySnapshot -Computer $compName -Software $monthSw -Updates $monthPatches `
                 -HistoryRoot $HistoryRoot -TargetYear $Year -TargetMonth $monthStr | Out-Null
