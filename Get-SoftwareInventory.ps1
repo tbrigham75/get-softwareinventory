@@ -294,6 +294,19 @@ function Get-InstalledUpdates {
         }
         $result
     }
+
+    # If WUA returned nothing and we aren't local, try hotfix fallback via WinRM
+    if (-not $result -or $result.Count -eq 0) {
+        Write-Warning "  Trying Win32_QuickFixEngineering fallback for $Computer..."
+        try {
+            $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
+            $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalHotfixFallback} -ErrorAction Stop
+            Remove-PSSession $session
+        } catch {
+            Write-Warning "  Hotfix fallback also failed for $Computer : $_"
+        }
+    }
+    $result
 }
 
 # ---------------------------------------------------------------
@@ -342,6 +355,29 @@ function Get-LocalUpdates {
             Sort-Object InstallDate -Descending
     } catch {
         Write-Warning "WUA query failed: $_"
+        Write-Warning "  Falling back to Win32_QuickFixEngineering..."
+        Get-LocalHotfixFallback
+    }
+}
+
+# ---------------------------------------------------------------
+# Get-LocalHotfixFallback
+# Queries Win32_QuickFixEngineering (Get-HotFix) as a fallback
+# when the WUA COM API is unavailable.
+# ---------------------------------------------------------------
+function Get-LocalHotfixFallback {
+    try {
+        Get-HotFix | ForEach-Object {
+            [PSCustomObject]@{
+                Title       = "$($_.HotFixID) - $($_.Description)"
+                InstallDate = if ($_.InstalledOn) { $_.InstalledOn.ToString('yyyy-MM-dd') } else { 'Unknown' }
+                Result      = 'Succeeded'
+                Description = if ($_.Description) { $_.Description } else { '' }
+                UpdateID    = if ($_.HotFixID) { $_.HotFixID } else { '' }
+            }
+        } | Sort-Object InstallDate -Descending
+    } catch {
+        Write-Warning "Hotfix fallback also failed: $_"
         @()
     }
 }
