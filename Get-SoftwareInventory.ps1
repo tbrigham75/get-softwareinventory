@@ -735,11 +735,11 @@ function toggleTheme() {
     localStorage.setItem('theme', 'dark');
   }
 }
-(function() {
+document.addEventListener('DOMContentLoaded', function() {
   var saved = localStorage.getItem('theme');
   if (saved === 'dark') document.body.classList.add('dark');
   if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
-})();
+});
 function filterTable(inputId, tableId) {
   var input = document.getElementById(inputId);
   var filter = input.value.toLowerCase();
@@ -1056,11 +1056,11 @@ function toggleTheme() {
     localStorage.setItem('theme', 'dark');
   }
 }
-(function() {
+document.addEventListener('DOMContentLoaded', function() {
   var saved = localStorage.getItem('theme');
   if (saved === 'dark') document.body.classList.add('dark');
   if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
-})();
+});
 function filterTable(inputId, tableId) {
   var input = document.getElementById(inputId);
   var filter = input.value.toLowerCase();
@@ -1289,11 +1289,11 @@ function toggleTheme() {
   if (body.classList.contains('dark')) { body.classList.remove('dark'); localStorage.setItem('theme', 'light'); }
   else { body.classList.add('dark'); localStorage.setItem('theme', 'dark'); }
 }
-(function() {
+document.addEventListener('DOMContentLoaded', function() {
   var saved = localStorage.getItem('theme');
   if (saved === 'dark') document.body.classList.add('dark');
   if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
-})();
+});
 function filterTable(inputId, tableId) {
   var input = document.getElementById(inputId);
   var filter = input.value.toUpperCase();
@@ -1516,11 +1516,11 @@ function toggleTheme() {
     localStorage.setItem('theme', 'dark');
   }
 }
-(function() {
+document.addEventListener('DOMContentLoaded', function() {
   var saved = localStorage.getItem('theme');
   if (saved === 'dark') document.body.classList.add('dark');
   if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
-})();
+});
 </script>
 </head>
 <body>
@@ -1604,11 +1604,11 @@ function toggleTheme() {
     localStorage.setItem('theme', 'dark');
   }
 }
-(function() {
+document.addEventListener('DOMContentLoaded', function() {
   var saved = localStorage.getItem('theme');
   if (saved === 'dark') document.body.classList.add('dark');
   if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
-})();
+});
 </script>
 </head>
 <body>
@@ -1687,11 +1687,11 @@ function toggleTheme() {
     localStorage.setItem('theme', 'dark');
   }
 }
-(function() {
+document.addEventListener('DOMContentLoaded', function() {
   var saved = localStorage.getItem('theme');
   if (saved === 'dark') document.body.classList.add('dark');
   if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
-})();
+});
 function filterTable(inputId, tableId) {
   var input = document.getElementById(inputId);
   var filter = input.value.toLowerCase();
@@ -2030,7 +2030,6 @@ foreach ($result in $allResults) {
 # Generate combined month page, failures page, and root index
 $now = Get-Date
 $currentYear = $now.ToString('yyyy')
-$currentMonth = $now.ToString('MM')
 Write-Host "Backfilling missing history months..."
 $backfilled = Backfill-HistoryMonths -HistoryRoot $HistoryPath -Year $currentYear
 if ($backfilled.Count -gt 0) {
