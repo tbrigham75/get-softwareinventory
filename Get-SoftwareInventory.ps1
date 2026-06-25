@@ -778,8 +778,8 @@ function sortTable(tableId, col) {
 <h1>Software Inventory Report</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number">$totalSw</div><div class="label">3rd Party Software</div></div>
-    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Windows Patches</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../all-software.html" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../all-software.html" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
     <div class="summary-item"><div class="number"><span class="badge-new">+$newSwCount</span></div><div class="label">New Software</div></div>
     <div class="summary-item"><div class="number"><span class="badge-removed">$remSwCount</span></div><div class="label">Removed Software</div></div>
     <div class="summary-item"><div class="number"><span class="badge-update">+$newUpCount</span></div><div class="label">New Patches</div></div>
@@ -795,10 +795,12 @@ function sortTable(tableId, col) {
 "@
 
     # Removed Software section
-    $html += @"
+    if ($remSwCount -gt 0) {
+        $html += @"
 <h2 class="section-title">Removed Software <span class="badge-removed">$remSwCount</span></h2>
 <table id="remSw-table"><thead><tr><th onclick="sortTable('remSw-table',0)">Name</th><th onclick="sortTable('remSw-table',1)">Version</th></tr></thead><tbody>$remSwRows</tbody></table>
 "@
+    }
 
     # New Updates section
     $html += @"
@@ -1096,9 +1098,9 @@ function sortTable(tableId, col) {
 <h1>$monthName $Year &mdash; Combined Inventory</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number">$compCount</div><div class="label">Computers</div></div>
-    <div class="summary-item"><div class="number">$totalSw</div><div class="label">3rd Party Software</div></div>
-    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Windows Patches</div></div>
+    <div class="summary-item"><div class="number"><a href="../../computers.html" style="color:inherit;text-decoration:none">$compCount</a></div><div class="label">Computers</div></div>
+    <div class="summary-item"><div class="number"><a href="../../all-software.html" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number"><a href="../../all-software.html" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
   </div>
   <div class="meta">Computers: $compList &nbsp;|&nbsp; Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
 </div>
@@ -1364,18 +1366,18 @@ function sortTable(tableId, col) {
 <div class="summary">
   <div class="summary-grid">
     <div class="summary-item">
-      <div class="number">$totalSw</div>
+      <div class="number"><a href="#software-section" style="color:inherit;text-decoration:none">$totalSw</a></div>
       <div class="label">Unique Software Titles</div>
     </div>
     <div class="summary-item">
-      <div class="number">$totalPatches</div>
+      <div class="number"><a href="#patches-section" style="color:inherit;text-decoration:none">$totalPatches</a></div>
       <div class="label">Unique Windows Patches</div>
     </div>
   </div>
   <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; <a href="index.html" class="back-link">&larr; Back to Archive</a></div>
 </div>
 
-<h2 class="section-title">3rd Party Software <span class="badge-new">$totalSw</span></h2>
+<h2 class="section-title" id="software-section">3rd Party Software <span class="badge-new">$totalSw</span></h2>
 <input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
 <table id="sw-table"><thead><tr>
   <th onclick="sortTable('sw-table',0)">Name</th>
@@ -1386,7 +1388,7 @@ function sortTable(tableId, col) {
   <th onclick="sortTable('sw-table',5)">Computer List</th>
 </tr></thead><tbody>$swRows</tbody></table>
 
-<h2 class="section-title">Windows Patches <span class="badge-update">$totalPatches</span></h2>
+<h2 class="section-title" id="patches-section">Windows Patches <span class="badge-update">$totalPatches</span></h2>
 <input type="text" id="patch-filter" class="search-box" placeholder="Filter patches..." onkeyup="filterTable('patch-filter','patch-table')">
 <table id="patch-table"><thead><tr>
   <th onclick="sortTable('patch-table',0)">Title</th>
@@ -1711,8 +1713,8 @@ function New-WebsiteIndexHtml {
   .year-heading a { color: #1a3a5c; text-decoration: none; }
   .year-heading a:hover { text-decoration: underline; }
   .month-list { display: flex; flex-wrap: wrap; gap: 8px; }
-  .month-link { display: inline-block; background: #e8f0fe; color: #1a3a5c; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 14px; }
-  .month-link:hover { background: #d0e0f0; }
+  .month-link, .year-link { display: inline-block; background: #e8f0fe; color: #1a3a5c; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 14px; }
+  .month-link:hover, .year-link:hover { background: #d0e0f0; }
   .year-section { margin-top: 30px; color: #1a3a5c; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
   .month-section { margin-top: 20px; }
   .month-section a { color: #2a5a8c; text-decoration: none; }
@@ -1729,8 +1731,8 @@ function New-WebsiteIndexHtml {
     body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
     body.theme-auto h1 { color: #80b0e0; }
     body.theme-auto .year-group { background: #16213e; }
-    body.theme-auto .month-link { background: #0f3460; color: #80b0e0; }
-    body.theme-auto .month-link:hover { background: #1a4a7a; }
+    body.theme-auto .month-link, body.theme-auto .year-link { background: #0f3460; color: #80b0e0; }
+    body.theme-auto .month-link:hover, body.theme-auto .year-link:hover { background: #1a4a7a; }
     body.theme-auto .meta { color: #888; }
     body.theme-auto .failures-link.green { background: #1b5e20; color: #a5d6a7; }
     body.theme-auto .failures-link.red { background: #b71c1c; color: #ffcdd2; }
@@ -1738,8 +1740,8 @@ function New-WebsiteIndexHtml {
   body.dark { background: #1a1a2e; color: #e0e0e0; }
   body.dark h1 { color: #80b0e0; }
   body.dark .year-group { background: #16213e; }
-  body.dark .month-link { background: #0f3460; color: #80b0e0; }
-  body.dark .month-link:hover { background: #1a4a7a; }
+  body.dark .month-link, body.dark .year-link { background: #0f3460; color: #80b0e0; }
+  body.dark .month-link:hover, body.dark .year-link:hover { background: #1a4a7a; }
   body.dark .meta { color: #888; }
   body.dark .failures-link.green { background: #1b5e20; color: #a5d6a7; }
   body.dark .failures-link.red { background: #b71c1c; color: #ffcdd2; }
@@ -1781,7 +1783,7 @@ function filterLinks() {
   <h2 style="margin:0 0 10px 0;">Jump to Year</h2>
   <div class="month-list">
 $(
-    ($sortedYears | ForEach-Object { "<a href='#year-$_' class='month-link'>$_</a>" }) -join "`n"
+    ($sortedYears | ForEach-Object { "<a href='#year-$_' class='year-link'>$_</a>" }) -join "`n"
 )
   </div>
   <div style="margin-top: 15px; border-top: 1px solid #e0e0e0; padding-top: 12px;">
@@ -1839,10 +1841,18 @@ function New-FailuresHtml {
     body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
     body.theme-auto h1 { color: #81c784; }
     body.theme-auto .success { background: #1b5e20; color: #a5d6a7; }
+    body.theme-auto a.back-link { color: #81c784; }
+    body.theme-auto .meta { color: #a0c0e0; }
+    body.theme-auto .theme-toggle { border-color: #81c784; color: #81c784; }
+    body.theme-auto .theme-toggle:hover { background: #81c784; color: #1a1a2e; }
   }
   body.dark { background: #1a1a2e; color: #e0e0e0; }
   body.dark h1 { color: #81c784; }
   body.dark .success { background: #1b5e20; color: #a5d6a7; }
+  body.dark a.back-link { color: #81c784; }
+  body.dark .meta { color: #a0c0e0; }
+  body.dark .theme-toggle { border-color: #81c784; color: #81c784; }
+  body.dark .theme-toggle:hover { background: #81c784; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
