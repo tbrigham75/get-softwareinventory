@@ -1447,7 +1447,7 @@ function New-WebsiteIndexHtml {
             $compCount = ($compEntries | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
             if ($compCount -eq 0 -and $HistoryRoot) {
                 $compCount = (Get-ChildItem -Path $HistoryRoot -Directory -ErrorAction SilentlyContinue |
-                    Where-Object { (Get-ChildItem -Path "$(Join-Path $_.FullName $y $m)" -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue).Count -gt 0 }
+                    Where-Object { (Get-ChildItem -Path ([System.IO.Path]::Combine($_.FullName, $y, $m)) -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue).Count -gt 0 }
                 ).Count
             }
             $compLabel = if ($compCount -gt 0) { " ($compCount PCs)" } else { '' }
