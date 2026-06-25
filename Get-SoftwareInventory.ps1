@@ -543,8 +543,8 @@ function Compare-Snapshots {
     $prevNorm = $prevSw | ForEach-Object { $_.Normalized }
     $currNorm = $currSw | ForEach-Object { $_.Normalized }
 
-    $newSw = $currSw | Where-Object { $_.Normalized -notin $prevNorm }
-    $removedSw = $prevSw | Where-Object { $_.Normalized -notin $currNorm }
+    $newSw = @($currSw | Where-Object { $_.Normalized -notin $prevNorm })
+    $removedSw = @($prevSw | Where-Object { $_.Normalized -notin $currNorm })
 
     # Updates comparison
     $prevUpTitles = $PreviousSnapshot.Updates | ForEach-Object {
@@ -554,9 +554,9 @@ function Compare-Snapshots {
         ($_.Title -replace '\s+', ' ').Trim()
     }
 
-    $newUp = $CurrentUpdates | Where-Object {
+    $newUp = @($CurrentUpdates | Where-Object {
         ($_.Title -replace '\s+', ' ').Trim() -notin $prevUpTitles
-    }
+    })
 
     @{
         NewSoftware     = $newSw | Sort-Object Name
@@ -962,17 +962,17 @@ function New-MonthReportHtml {
     $compCount = $computersFound.Count
 
     # Filter software to only those installed in the selected month
-    $allSoftware = $allSoftware | Where-Object {
+    $allSoftware = @($allSoftware | Where-Object {
         try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$Month }
         catch { $false }
-    }
+    })
     $totalSw = $allSoftware.Count
 
     # Filter updates to only those installed in the selected month
-    $allUpdates = $allUpdates | Where-Object {
+    $allUpdates = @($allUpdates | Where-Object {
         try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$Month }
         catch { $false }
-    }
+    })
     $totalUp = $allUpdates.Count
 
     # Build software rows with hostname column
@@ -2382,15 +2382,15 @@ function Backfill-HistoryMonths {
                 continue
             }
 
-            $monthSw = $allSoftware.Values | Where-Object {
+            $monthSw = @($allSoftware.Values | Where-Object {
                 try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$monthStr }
                 catch { $true }
-            }
+            })
 
-            $monthPatches = $allPatches.Values | Where-Object {
+            $monthPatches = @($allPatches.Values | Where-Object {
                 try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$monthStr }
                 catch { $false }
-            }
+            })
 
             Write-Host "      $compFolder ${Year}-${monthStr}: $($monthSw.Count) sw, $($monthPatches.Count) patches"
             if ($monthSw.Count -eq 0 -and $monthPatches.Count -eq 0) {
