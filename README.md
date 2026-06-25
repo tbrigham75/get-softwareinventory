@@ -79,6 +79,7 @@ History\<Computer>\YYYY\MM\snapshot-*.json    Full snapshot history (one per run
 - **Per-computer history** — each host gets its own snapshot folder; change detection compares against the most recent prior run at any time
 - **Failures isolation** — failed hosts don't appear in main inventory views; a green/red link on the root index shows failure status
 - **Sortable tables** — vanilla JavaScript, no dependencies; click any column header to sort
+- **Dark/light theme** — vanilla JavaScript, propagates across all pages via `?theme=` URL query parameters with `localStorage`/`matchMedia` fallback
 - **PS 5.1 limitations honored** — no `Join-Path` with >2 segments (uses `[System.IO.Path]::Combine` instead), no `-WarningVariable`/`4>$null` in nested functions
 - **`[datetime]` cast for date handling** — robust against `ConvertFrom-Json` behavior differences between PS 5.1 (strings) and PS 7+ (DateTime objects)
 - **Data-driven month discovery** — `Backfill-HistoryMonths` discovers months from actual snapshot InstallDates rather than iterating month numbers, naturally handling non-contiguous dates
@@ -93,7 +94,7 @@ History\<Computer>\YYYY\MM\snapshot-*.json    Full snapshot history (one per run
 
 | File | Purpose |
 |------|---------|
-| `Get-SoftwareInventory.ps1` | Main script (~2065 lines, ~25 functions) |
+| `Get-SoftwareInventory.ps1` | Main script (~2622 lines, ~25 functions) |
 | `hostnames.txt` | Default list of computers to inventory |
 | `History\` | Archived JSON snapshots (auto-created) |
 | `Output\` | Generated HTML reports (auto-created) |
