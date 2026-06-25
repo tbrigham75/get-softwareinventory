@@ -796,12 +796,12 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="../../../index.html">&larr; Back to archive</a>
+<a class="back-link" href="../../../../index.html">&larr; Back to archive</a>
 <h1>Software Inventory Report</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number"><a href="../../../all-software.html" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
-    <div class="summary-item"><div class="number"><a href="../../../all-software.html" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../../all-software.html" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../../all-software.html" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
     <div class="summary-item"><div class="number"><span class="badge-new">+$newSwCount</span></div><div class="label">New Software</div></div>
     <div class="summary-item"><div class="number"><span class="badge-removed">$remSwCount</span></div><div class="label">Removed Software</div></div>
     <div class="summary-item"><div class="number"><span class="badge-update">+$newUpCount</span></div><div class="label">New Patches</div></div>
@@ -847,11 +847,10 @@ function sortTable(tableId, col) {
 
     # Ensure output directory exists
     $compFolder = $Computer -replace '[/\\:*?"<>|]', '_'
-    $outDir = [System.IO.Path]::Combine($OutputDir, $compFolder, $year, $month)
+    $outDir = [System.IO.Path]::Combine($OutputDir, "hosts", $compFolder, $year, $month)
     if (-not (Test-Path $outDir)) {
         New-Item -Path $outDir -ItemType Directory -Force | Out-Null
     }
-
     $reportFile = Join-Path $outDir "report.html"
     $html | Out-File -FilePath $reportFile -Encoding utf8
     Write-Host "  Report saved: $reportFile"
@@ -876,11 +875,10 @@ function New-CsvExport {
     $timestamp = $now.ToString('yyyyMMdd-HHmm')
 
     $compFolder = $Computer -replace '[/\\:*?"<>|]', '_'
-    $outDir = [System.IO.Path]::Combine($OutputDir, $compFolder, $year, $month)
+    $outDir = [System.IO.Path]::Combine($OutputDir, "hosts", $compFolder, $year, $month)
     if (-not (Test-Path $outDir)) {
         New-Item -Path $outDir -ItemType Directory -Force | Out-Null
     }
-
     $swFile = Join-Path $outDir "software-$timestamp.csv"
     $Software | Select-Object Name, Version, Publisher, InstallDate, Architecture |
         Export-Csv -Path $swFile -NoTypeInformation -Encoding utf8
@@ -1224,15 +1222,15 @@ function New-AllSoftwareHtml {
                 $cf = $cn -replace '[/\\:*?"<>|]', '_'
                 if ($computerLatest.ContainsKey($cf)) {
                     $cl = $computerLatest[$cf]
-                    $compLinks[$cn] = "<a href='./$cf/$($cl.Year)/$($cl.Month)/report.html'>$(ConvertTo-HtmlEncoded $cn)</a>"
-                } else {
-                    $compLinks[$cn] = $(ConvertTo-HtmlEncoded $cn)
-                }
+    $compLinks[$cn] = "<a href='./hosts/$cf/$($cl.Year)/$($cl.Month)/report.html'>$(ConvertTo-HtmlEncoded $cn)</a>"
+            } else {
+                $compLinks[$cn] = $(ConvertTo-HtmlEncoded $cn)
             }
-            $computers = ($compNames | ForEach-Object { $compLinks[$_] }) -join ', '
-            $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.SnapDate } -Descending |
-                Select-Object -First 1
-            $latestInstallDate = $items | Sort-Object { if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate } } -Descending | Select-Object -First 1
+        }
+        $computers = ($compNames | ForEach-Object { $compLinks[$_] }) -join ', '
+        $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.SnapDate } -Descending |
+            Select-Object -First 1
+        $latestInstallDate = $items | Sort-Object { if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate } } -Descending | Select-Object -First 1
             $swEntries += [PSCustomObject]@{
                 Name          = $items[0].Name
                 Version       = $latest.Version
@@ -1272,7 +1270,7 @@ function New-AllSoftwareHtml {
                 $cf = $cn -replace '[/\\:*?"<>|]', '_'
                 if ($computerLatest.ContainsKey($cf)) {
                     $cl = $computerLatest[$cf]
-                    $compLinks[$cn] = "<a href='./$cf/$($cl.Year)/$($cl.Month)/report.html'>$(ConvertTo-HtmlEncoded $cn)</a>"
+                    $compLinks[$cn] = "<a href='./hosts/$cf/$($cl.Year)/$($cl.Month)/report.html'>$(ConvertTo-HtmlEncoded $cn)</a>"
                 } else {
                     $compLinks[$cn] = $(ConvertTo-HtmlEncoded $cn)
                 }
@@ -1535,7 +1533,7 @@ function New-ComputersHtml {
     $rowsSb = New-Object System.Text.StringBuilder
     foreach ($e in $entries) {
         if ($e.Year -and $e.Month) {
-            $link = "<a href='./$($e.Computer)/$($e.Year)/$($e.Month)/report.html'>$(ConvertTo-HtmlEncoded $e.Computer)</a>"
+            $link = "<a href='./hosts/$($e.Computer)/$($e.Year)/$($e.Month)/report.html'>$(ConvertTo-HtmlEncoded $e.Computer)</a>"
         } else {
             $link = ConvertTo-HtmlEncoded $e.Computer
         }
@@ -1734,10 +1732,10 @@ function New-WebsiteIndexHtml {
     foreach ($r in $reports) {
         $rel = $r.Directory.FullName.Substring($OutputDirNorm.Length + 1)
         $parts = $rel -split '[/\\]'
-        if ($parts.Count -ge 3) {
-            $compFolder = $parts[0]
-            $y = $parts[1]
-            $m = $parts[2]
+        if ($parts.Count -ge 4) {
+            $compFolder = $parts[1]
+            $y = $parts[2]
+            $m = $parts[3]
             if (-not $years[$y]) { $years[$y] = @{} }
             if (-not $years[$y][$m]) { $years[$y][$m] = @() }
             $years[$y][$m] += @{ Computer = $compFolder; Path = $r.FullName }
