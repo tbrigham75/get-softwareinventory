@@ -1135,28 +1135,28 @@ function New-AllSoftwareHtml {
     $snapshotFiles = Get-ChildItem -Path $HistoryRoot -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
     if ($snapshotFiles.Count -eq 0) { return }
 
-    $allSoftware = @()
-    $allPatches = @()
+    [System.Collections.ArrayList]$allSoftware = @()
+    [System.Collections.ArrayList]$allPatches = @()
     foreach ($file in $snapshotFiles) {
         try {
             $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
             $snapDate = $file.BaseName -replace '^snapshot-', ''
             foreach ($sw in $snap.Software) {
-                $allSoftware += [PSCustomObject]@{
+                $null = $allSoftware.Add([PSCustomObject]@{
                     Name        = $sw.Name
                     Version     = $sw.Version
                     Publisher   = $sw.Publisher
                     InstallDate = if ($sw.InstallDate) { $sw.InstallDate } else { 'Unknown' }
                     Computer    = $snap.Computer
                     SnapDate    = $snapDate
-                }
+                })
             }
             foreach ($up in $snap.Updates) {
-                $allPatches += [PSCustomObject]@{
+                $null = $allPatches.Add([PSCustomObject]@{
                     Title       = $up.Title
                     InstallDate = if ($up.InstallDate) { $up.InstallDate } else { 'Unknown' }
                     Computer    = $snap.Computer
-                }
+                })
             }
         } catch {
             # skip corrupt snapshots
@@ -1187,17 +1187,18 @@ function New-AllSoftwareHtml {
     }
     $totalSw = $swEntries.Count
 
-    $swRows = ''
+    $swSb = New-Object System.Text.StringBuilder
     foreach ($item in $swEntries) {
-        $swRows += @"
+        $null = $swSb.Append(@"
 <tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
     <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td>
     <td>$(ConvertTo-HtmlEncoded $item.ComputerCount)</td>
     <td>$(ConvertTo-HtmlEncoded $item.ComputerList)</td></tr>
-"@
+"@)
     }
+    $swRows = $swSb.ToString()
 
     # --- Patch dedup ---
     $patchEntries = @()
@@ -1221,15 +1222,16 @@ function New-AllSoftwareHtml {
     }
     $totalPatches = $patchEntries.Count
 
-    $patchRows = ''
+    $patchSb = New-Object System.Text.StringBuilder
     foreach ($item in $patchEntries) {
-        $patchRows += @"
+        $null = $patchSb.Append(@"
 <tr><td>$(ConvertTo-HtmlEncoded $item.Title)</td>
     <td>$(ConvertTo-HtmlEncoded $item.ComputerCount)</td>
     <td>$(ConvertTo-HtmlEncoded $item.ComputerList)</td>
     <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td></tr>
-"@
+"@)
     }
+    $patchRows = $patchSb.ToString()
 
     $now = Get-Date
     $html = @"
@@ -1310,19 +1312,21 @@ function filterTable(inputId, tableId) {
 }
 function sortTable(tableId, col) {
   var table = document.getElementById(tableId);
-  var switching = true;
-  var dir = 'asc';
-  while (switching) {
-    switching = false;
-    var rows = table.rows;
-    for (var i = 1; i < rows.length - 1; i++) {
-      var x = rows[i].getElementsByTagName('td')[col];
-      var y = rows[i + 1].getElementsByTagName('td')[col];
-      var cmp = dir === 'asc' ? x.textContent.localeCompare(y.textContent) : y.textContent.localeCompare(x.textContent);
-      if (cmp > 0) { rows[i].parentNode.insertBefore(rows[i + 1], rows[i]); switching = true; break; }
-    }
-    if (!switching && dir === 'asc') { dir = 'desc'; switching = true; }
-  }
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  var dir = table.getAttribute('data-sort-dir-' + col) === 'asc' ? 'desc' : 'asc';
+  table.setAttribute('data-sort-dir-' + col, dir);
+  var multiplier = dir === 'asc' ? 1 : -1;
+  rows.sort(function(a, b) {
+    var aText = a.children[col].textContent.trim();
+    var bText = b.children[col].textContent.trim();
+    var aDate = Date.parse(aText);
+    var bDate = Date.parse(bText);
+    if (!isNaN(aDate) && !isNaN(bDate)) return (aDate - bDate) * multiplier;
+    return aText.localeCompare(bText, undefined, { numeric: true }) * multiplier;
+  });
+  rows.forEach(function(row) { tbody.appendChild(row); });
 }
 </script>
 </head>
