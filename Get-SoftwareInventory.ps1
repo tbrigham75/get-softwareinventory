@@ -1137,10 +1137,17 @@ function New-AllSoftwareHtml {
 
     [System.Collections.ArrayList]$allSoftware = @()
     [System.Collections.ArrayList]$allPatches = @()
+    $computerLatest = @{}
     foreach ($file in $snapshotFiles) {
         try {
             $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
             $snapDate = $file.BaseName -replace '^snapshot-', ''
+            $compFolder = $snap.Computer -replace '[/\\:*?"<>|]', '_'
+            $snapYear = $snapDate.Substring(0, 4)
+            $snapMonth = $snapDate.Substring(4, 2)
+            if (-not $computerLatest.ContainsKey($compFolder) -or $snapDate -gt $computerLatest[$compFolder].SnapDate) {
+                $computerLatest[$compFolder] = @{ SnapDate = $snapDate; Year = $snapYear; Month = $snapMonth; Computer = $snap.Computer }
+            }
             foreach ($sw in $snap.Software) {
                 $null = $allSoftware.Add([PSCustomObject]@{
                     Name        = $sw.Name
@@ -1169,8 +1176,19 @@ function New-AllSoftwareHtml {
         $grouped = $allSoftware | Group-Object -Property { ($_.Name -replace '\s+', ' ').Trim().ToLower() }
         foreach ($g in $grouped) {
             $items = $g.Group
-            $computers = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object) -join ', '
-            $compCount = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
+            $compNames = $items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object
+            $compCount = $compNames.Count
+            $compLinks = @{}
+            foreach ($cn in $compNames) {
+                $cf = $cn -replace '[/\\:*?"<>|]', '_'
+                if ($computerLatest.ContainsKey($cf)) {
+                    $cl = $computerLatest[$cf]
+                    $compLinks[$cn] = "<a href='./$cf/$($cl.Year)/$($cl.Month)/report.html'>$(ConvertTo-HtmlEncoded $cn)</a>"
+                } else {
+                    $compLinks[$cn] = $(ConvertTo-HtmlEncoded $cn)
+                }
+            }
+            $computers = ($compNames | ForEach-Object { $compLinks[$_] }) -join ', '
             $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.SnapDate } -Descending |
                 Select-Object -First 1
             $latestInstallDate = $items | Sort-Object { if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate } } -Descending | Select-Object -First 1
@@ -1194,8 +1212,8 @@ function New-AllSoftwareHtml {
     <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
     <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td>
-    <td>$(ConvertTo-HtmlEncoded $item.ComputerCount)</td>
-    <td>$(ConvertTo-HtmlEncoded $item.ComputerList)</td></tr>
+    <td><a href="computers.html">$($item.ComputerCount)</a></td>
+    <td>$($item.ComputerList)</td></tr>
 "@)
     }
     $swRows = $swSb.ToString()
@@ -1206,8 +1224,19 @@ function New-AllSoftwareHtml {
         $grouped = $allPatches | Group-Object -Property { ($_.Title -replace '\s+', ' ').Trim().ToLower() }
         foreach ($g in $grouped) {
             $items = $g.Group
-            $computers = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object) -join ', '
-            $compCount = ($items | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
+            $compNames = $items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object
+            $compCount = $compNames.Count
+            $compLinks = @{}
+            foreach ($cn in $compNames) {
+                $cf = $cn -replace '[/\\:*?"<>|]', '_'
+                if ($computerLatest.ContainsKey($cf)) {
+                    $cl = $computerLatest[$cf]
+                    $compLinks[$cn] = "<a href='./$cf/$($cl.Year)/$($cl.Month)/report.html'>$(ConvertTo-HtmlEncoded $cn)</a>"
+                } else {
+                    $compLinks[$cn] = $(ConvertTo-HtmlEncoded $cn)
+                }
+            }
+            $computers = ($compNames | ForEach-Object { $compLinks[$_] }) -join ', '
             $latest = $items | Sort-Object {
                 if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate }
             } -Descending | Select-Object -First 1
@@ -1226,8 +1255,8 @@ function New-AllSoftwareHtml {
     foreach ($item in $patchEntries) {
         $null = $patchSb.Append(@"
 <tr><td>$(ConvertTo-HtmlEncoded $item.Title)</td>
-    <td>$(ConvertTo-HtmlEncoded $item.ComputerCount)</td>
-    <td>$(ConvertTo-HtmlEncoded $item.ComputerList)</td>
+    <td><a href="computers.html">$($item.ComputerCount)</a></td>
+    <td>$($item.ComputerList)</td>
     <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td></tr>
 "@)
     }
@@ -1372,6 +1401,211 @@ function sortTable(tableId, col) {
     $outputFile = Join-Path $OutputDir "all-software.html"
     $html | Out-File -FilePath $outputFile -Encoding utf8
     Write-Host "  All Software & Patches page saved: $outputFile"
+}
+
+# ---------------------------------------------------------------
+# New-ComputersHtml
+# Generates Output\computers.html listing all unique hostnames
+# from history, each linked to its per-computer report.
+# ---------------------------------------------------------------
+function New-ComputersHtml {
+    param(
+        [string]$HistoryRoot,
+        [string]$OutputDir
+    )
+
+    $computerDirs = Get-ChildItem -Path $HistoryRoot -Directory -ErrorAction SilentlyContinue
+    if ($computerDirs.Count -eq 0) { return }
+
+    $entries = @()
+    foreach ($compDir in $computerDirs) {
+        $compFolder = $compDir.Name
+        $yearDirs = Get-ChildItem -Path $compDir.FullName -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+        $latestYear = $null
+        $latestMonth = $null
+        $latestSnapDate = $null
+        $swCount = 0
+        $upCount = 0
+        foreach ($yd in $yearDirs) {
+            $monthDirs = Get-ChildItem -Path $yd.FullName -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+            foreach ($md in $monthDirs) {
+                $snapFiles = Get-ChildItem -Path $md.FullName -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending
+                if ($snapFiles.Count -gt 0) {
+                    try {
+                        $snap = Get-Content -Path $snapFiles[0].FullName -Raw | ConvertFrom-Json
+                        $swCount = $snap.Software.Count
+                        $upCount = $snap.Updates.Count
+                        $latestSnapDate = $snap.Date
+                    } catch { }
+                    $latestYear = $yd.Name
+                    $latestMonth = $md.Name
+                    break
+                }
+            }
+            if ($latestYear) { break }
+        }
+        $entries += [PSCustomObject]@{
+            Computer   = $compFolder
+            SnapDate   = if ($latestSnapDate) { $latestSnapDate } else { 'Unknown' }
+            SwCount    = $swCount
+            UpCount    = $upCount
+            Year       = $latestYear
+            Month      = $latestMonth
+        }
+    }
+
+    $entries = $entries | Sort-Object Computer
+    $totalComputers = $entries.Count
+
+    $rowsSb = New-Object System.Text.StringBuilder
+    foreach ($e in $entries) {
+        if ($e.Year -and $e.Month) {
+            $link = "<a href='./$($e.Computer)/$($e.Year)/$($e.Month)/report.html'>$(ConvertTo-HtmlEncoded $e.Computer)</a>"
+        } else {
+            $link = ConvertTo-HtmlEncoded $e.Computer
+        }
+        $null = $rowsSb.Append(@"
+<tr><td>$link</td>
+    <td>$(ConvertTo-HtmlEncoded $e.SnapDate)</td>
+    <td>$($e.SwCount)</td>
+    <td>$($e.UpCount)</td></tr>
+"@)
+    }
+    $rows = $rowsSb.ToString()
+
+    $now = Get-Date
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Computers - Global Inventory</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1, h2, h3 { color: #1a3a5c; }
+  .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 10px; }
+  .summary-item { background: #e8f0fe; padding: 10px; border-radius: 4px; text-align: center; }
+  .summary-item .number { font-size: 24px; font-weight: bold; color: #1a3a5c; }
+  .summary-item .label { font-size: 13px; color: #666; }
+  .meta { font-size: 13px; color: #888; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
+  th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
+  th:hover { background: #2a5a8c; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; word-break: break-word; }
+  tr:hover td { background: #f0f5ff; }
+  .section-title { margin: 25px 0 10px 0; }
+  .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
+  .search-box:focus { outline: none; border-color: #1a3a5c; box-shadow: 0 0 4px rgba(26,58,92,.3); }
+  a.back-link { color: #1a3a5c; text-decoration: none; }
+  a.back-link:hover { text-decoration: underline; }
+  a { color: #1a3a5c; }
+  a:hover { text-decoration: underline; }
+  .theme-toggle { float: right; background: none; border: 1px solid #1a3a5c; color: #1a3a5c; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { background: #1a3a5c; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    body.theme-auto { background: #1a1a2e; color: #e0e0e0; }
+    body.theme-auto h1, body.theme-auto h2, body.theme-auto h3 { color: #80b0e0; }
+    body.theme-auto .summary { background: #16213e; }
+    body.theme-auto .summary-item { background: #0f3460; }
+    body.theme-auto .summary-item .number { color: #80b0e0; }
+    body.theme-auto .summary-item .label { color: #a0c0e0; }
+    body.theme-auto .meta { color: #888; }
+    body.theme-auto table { background: #16213e; }
+    body.theme-auto th { background: #0f3460; }
+    body.theme-auto th:hover { background: #1a4a7a; }
+    body.theme-auto td { border-bottom: 1px solid #2a3a5e; }
+    body.theme-auto tr:hover td { background: #1a2a4e; }
+    body.theme-auto .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+    body.theme-auto .search-box:focus { border-color: #80b0e0; }
+    body.theme-auto a { color: #80b0e0; }
+  }
+  body.dark { background: #1a1a2e; color: #e0e0e0; }
+  body.dark h1, body.dark h2, body.dark h3 { color: #80b0e0; }
+  body.dark .summary { background: #16213e; }
+  body.dark .summary-item { background: #0f3460; }
+  body.dark .summary-item .number { color: #80b0e0; }
+  body.dark .summary-item .label { color: #a0c0e0; }
+  body.dark .meta { color: #888; }
+  body.dark table { background: #16213e; }
+  body.dark th { background: #0f3460; }
+  body.dark th:hover { background: #1a4a7a; }
+  body.dark td { border-bottom: 1px solid #2a3a5e; }
+  body.dark tr:hover td { background: #1a2a4e; }
+  body.dark .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+  body.dark .search-box:focus { border-color: #80b0e0; }
+  body.dark a { color: #80b0e0; }
+</style>
+<script>
+function toggleTheme() {
+  var body = document.body;
+  if (body.classList.contains('dark')) { body.classList.remove('dark'); localStorage.setItem('theme', 'light'); }
+  else { body.classList.add('dark'); localStorage.setItem('theme', 'dark'); }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  var saved = localStorage.getItem('theme');
+  if (saved === 'dark') document.body.classList.add('dark');
+  if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
+});
+function filterTable(inputId, tableId) {
+  var input = document.getElementById(inputId);
+  var filter = input.value.toLowerCase();
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr');
+  for (var i = 0; i < rows.length; i++) {
+    var text = rows[i].textContent.toLowerCase();
+    rows[i].style.display = text.indexOf(filter) > -1 ? '' : 'none';
+  }
+}
+function sortTable(tableId, col) {
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  var dir = table.getAttribute('data-sort-dir-' + col) === 'asc' ? 'desc' : 'asc';
+  table.setAttribute('data-sort-dir-' + col, dir);
+  var multiplier = dir === 'asc' ? 1 : -1;
+  rows.sort(function(a, b) {
+    var aText = a.children[col].textContent.trim();
+    var bText = b.children[col].textContent.trim();
+    var aDate = Date.parse(aText);
+    var bDate = Date.parse(bText);
+    if (!isNaN(aDate) && !isNaN(bDate)) return (aDate - bDate) * multiplier;
+    return aText.localeCompare(bText, undefined, { numeric: true }) * multiplier;
+  });
+  rows.forEach(function(row) { tbody.appendChild(row); });
+}
+</script>
+</head>
+<body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
+<a class="back-link" href="index.html">&larr; Back to archive</a>
+<h1>Computers</h1>
+<div class="summary">
+  <div class="summary-grid">
+    <div class="summary-item"><div class="number">$totalComputers</div><div class="label">Total Computers</div></div>
+  </div>
+  <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
+</div>
+
+<h2 class="section-title">All Hosts</h2>
+<input type="text" id="comp-filter" class="search-box" placeholder="Filter computers..." onkeyup="filterTable('comp-filter','comp-table')">
+<table id="comp-table"><thead><tr>
+  <th onclick="sortTable('comp-table',0)">Hostname</th>
+  <th onclick="sortTable('comp-table',1)">Last Snapshot</th>
+  <th onclick="sortTable('comp-table',2)">Software</th>
+  <th onclick="sortTable('comp-table',3)">Patches</th>
+</tr></thead><tbody>$rows</tbody></table>
+</body></html>
+"@
+
+    $outputFile = Join-Path $OutputDir "computers.html"
+    $html | Out-File -FilePath $outputFile -Encoding utf8
+    Write-Host "  Computers page saved: $outputFile"
 }
 
 # ---------------------------------------------------------------
@@ -2062,6 +2296,8 @@ Write-Host "Generating failures page..."
 New-FailuresHtml -Failures $failures -OutputDir $OutputPath
 Write-Host "Generating All Software page..."
 New-AllSoftwareHtml -HistoryRoot $HistoryPath -OutputDir $OutputPath
+Write-Host "Generating Computers page..."
+New-ComputersHtml -HistoryRoot $HistoryPath -OutputDir $OutputPath
 Write-Host "Generating root website index..."
 New-WebsiteIndexHtml -OutputDir $OutputPath -HistoryRoot $HistoryPath -FailureCount $failures.Count
 
