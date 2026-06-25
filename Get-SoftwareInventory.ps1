@@ -789,28 +789,22 @@ function sortTable(tableId, col) {
 "@
 
     # New Software section
-    if ($newSwCount -gt 0) {
-        $html += @"
+    $html += @"
 <h2 class="section-title">New Software <span class="badge-new">$newSwCount</span></h2>
 <table id="newSw-table"><thead><tr><th onclick="sortTable('newSw-table',0)">Name</th><th onclick="sortTable('newSw-table',1)">Version</th><th onclick="sortTable('newSw-table',2)">Install Date</th></tr></thead><tbody>$newSwRows</tbody></table>
 "@
-    }
 
     # Removed Software section
-    if ($remSwCount -gt 0) {
-        $html += @"
+    $html += @"
 <h2 class="section-title">Removed Software <span class="badge-removed">$remSwCount</span></h2>
 <table id="remSw-table"><thead><tr><th onclick="sortTable('remSw-table',0)">Name</th><th onclick="sortTable('remSw-table',1)">Version</th></tr></thead><tbody>$remSwRows</tbody></table>
 "@
-    }
 
     # New Updates section
-    if ($newUpCount -gt 0) {
-        $html += @"
+    $html += @"
 <h2 class="section-title">New Patches <span class="badge-update">$newUpCount</span></h2>
 <table id="newUp-table"><thead><tr><th onclick="sortTable('newUp-table',0)">Title</th><th onclick="sortTable('newUp-table',1)">Install Date</th></tr></thead><tbody>$newUpRows</tbody></table>
 "@
-    }
 
     # All Software
     $html += @"
@@ -1007,7 +1001,10 @@ function New-MonthReportHtml {
   th:hover { background: #2a5a8c; }
   td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; word-break: break-word; }
   tr:hover td { background: #f0f5ff; }
-  .section-title { margin: 25px 0 10px 0; }
+   .section-title { margin: 25px 0 10px 0; }
+  .badge-new { display: inline-block; background: #2e7d32; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge-removed { display: inline-block; background: #c62828; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge-update { display: inline-block; background: #1565c0; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
   .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
   .search-box:focus { outline: none; border-color: #1a3a5c; box-shadow: 0 0 4px rgba(26,58,92,.3); }
   a.back-link { color: #1a3a5c; text-decoration: none; }
@@ -1106,16 +1103,15 @@ function sortTable(tableId, col) {
   <div class="meta">Computers: $compList &nbsp;|&nbsp; Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
 </div>
 
-<h2 class="section-title">3rd Party Software</h2>
+<h2 class="section-title">3rd Party Software <span class="badge-new">$totalSw</span></h2>
 <input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
 <table id="sw-table"><thead><tr><th onclick="sortTable('sw-table',0)">Hostname</th><th onclick="sortTable('sw-table',1)">Name</th><th onclick="sortTable('sw-table',2)">Version</th><th onclick="sortTable('sw-table',3)">Publisher</th><th onclick="sortTable('sw-table',4)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
 
-<h2 class="section-title">Windows Patches</h2>
+<h2 class="section-title">Windows Patches <span class="badge-update">$totalUp</span></h2>
 <input type="text" id="up-filter" class="search-box" placeholder="Filter updates..." onkeyup="filterTable('up-filter','up-table')">
 <table id="up-table"><thead><tr><th onclick="sortTable('up-table',0)">Hostname</th><th onclick="sortTable('up-table',1)">Title</th><th onclick="sortTable('up-table',2)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
 </body></html>
 "@
-
     $indexFile = Join-Path $monthDir "index.html"
     $html | Out-File -FilePath $indexFile -Encoding utf8
     Write-Host "  Month index saved: $indexFile ($totalSw sw, $totalUp patches)"
@@ -1279,6 +1275,9 @@ function New-AllSoftwareHtml {
   .summary-item .number { font-size: 24px; font-weight: bold; color: #1a3a5c; }
   .summary-item .label { font-size: 13px; color: #666; }
   .section-title { margin: 25px 0 10px 0; }
+  .badge-new { display: inline-block; background: #2e7d32; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge-removed { display: inline-block; background: #c62828; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge-update { display: inline-block; background: #1565c0; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
   .meta { font-size: 13px; color: #888; margin-top: 10px; }
   table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
   th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
@@ -1376,7 +1375,7 @@ function sortTable(tableId, col) {
   <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; <a href="index.html" class="back-link">&larr; Back to Archive</a></div>
 </div>
 
-<h2 class="section-title">3rd Party Software</h2>
+<h2 class="section-title">3rd Party Software <span class="badge-new">$totalSw</span></h2>
 <input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
 <table id="sw-table"><thead><tr>
   <th onclick="sortTable('sw-table',0)">Name</th>
@@ -1387,7 +1386,7 @@ function sortTable(tableId, col) {
   <th onclick="sortTable('sw-table',5)">Computer List</th>
 </tr></thead><tbody>$swRows</tbody></table>
 
-<h2 class="section-title">Windows Patches</h2>
+<h2 class="section-title">Windows Patches <span class="badge-update">$totalPatches</span></h2>
 <input type="text" id="patch-filter" class="search-box" placeholder="Filter patches..." onkeyup="filterTable('patch-filter','patch-table')">
 <table id="patch-table"><thead><tr>
   <th onclick="sortTable('patch-table',0)">Title</th>
@@ -1701,10 +1700,12 @@ function New-WebsiteIndexHtml {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Software Inventory Archive</title>
+<title>Software / Patch Inventory Archive</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
   h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
+  .search-box { margin-bottom: 15px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
+  .search-box:focus { outline: none; border-color: #1a3a5c; box-shadow: 0 0 4px rgba(26,58,92,.3); }
   .year-group { background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 15px; padding: 15px; }
   .year-heading { margin: 0 0 10px 0; }
   .year-heading a { color: #1a3a5c; text-decoration: none; }
@@ -1759,11 +1760,22 @@ document.addEventListener('DOMContentLoaded', function() {
   if (saved === 'dark') document.body.classList.add('dark');
   if (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches) document.body.classList.add('theme-auto');
 });
+function filterLinks() {
+  var input = document.getElementById('search');
+  var filter = input.value.toLowerCase();
+  var links = document.querySelectorAll('.month-link');
+  for (var i = 0; i < links.length; i++) {
+    var text = links[i].textContent.toLowerCase();
+    links[i].style.display = text.indexOf(filter) > -1 ? '' : 'none';
+  }
+}
 </script>
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<h1>Software Inventory Archive</h1>
+<h1>Software / Patch Inventory Archive</h1>
+
+<input type="text" id="search" class="search-box" placeholder="Search archive..." onkeyup="filterLinks()">
 
 <div class="year-group">
   <h2 style="margin:0 0 10px 0;">Jump to Year</h2>
@@ -1774,6 +1786,7 @@ $(
   </div>
   <div style="margin-top: 15px; border-top: 1px solid #e0e0e0; padding-top: 12px;">
     <a href="all-software.html" class="failures-link" style="background:#e8f0fe;color:#1a3a5c;">All Software &amp; Patches</a>
+    <a href="computers.html" class="failures-link" style="background:#e8f0fe;color:#1a3a5c;">Computers</a>
     <a href="failures.html" class="failures-link $(if ($FailureCount -gt 0) { 'red' } else { 'green' })">$(if ($FailureCount -gt 0) { "&#9888; View Failures ($FailureCount)" } else { "&#10003; No Failures" })</a>
   </div>
 </div>
