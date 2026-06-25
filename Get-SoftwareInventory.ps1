@@ -1378,6 +1378,7 @@ function sortTable(tableId, col) {
 function New-WebsiteIndexHtml {
     param(
         [string]$OutputDir,
+        [string]$HistoryRoot = '',
         [int]$FailureCount = 0
     )
 
@@ -1444,7 +1445,12 @@ function New-WebsiteIndexHtml {
             }
             $compEntries = $years[$y][$m] | Where-Object { $_.Computer -ne '' }
             $compCount = ($compEntries | ForEach-Object { $_.Computer } | Select-Object -Unique).Count
-            $compLabel = if ($compCount -gt 0) { " ($compCount computers)" } else { '' }
+            if ($compCount -eq 0 -and $HistoryRoot) {
+                $compCount = (Get-ChildItem -Path $HistoryRoot -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { (Get-ChildItem -Path "$(Join-Path $_.FullName $y $m)" -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue).Count -gt 0 }
+                ).Count
+            }
+            $compLabel = if ($compCount -gt 0) { " ($compCount PCs)" } else { '' }
             $navHtml += "<a href='./$y/$m/index.html' class='month-link'>$monthName $y$compLabel</a>`n"
         }
         $navHtml += "</div></div>"
@@ -2054,6 +2060,6 @@ New-FailuresHtml -Failures $failures -OutputDir $OutputPath
 Write-Host "Generating All Software page..."
 New-AllSoftwareHtml -HistoryRoot $HistoryPath -OutputDir $OutputPath
 Write-Host "Generating root website index..."
-New-WebsiteIndexHtml -OutputDir $OutputPath -FailureCount $failures.Count
+New-WebsiteIndexHtml -OutputDir $OutputPath -HistoryRoot $HistoryPath -FailureCount $failures.Count
 
 Write-Host "Done."
