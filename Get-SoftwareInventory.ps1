@@ -903,7 +903,7 @@ function New-MonthReportHtml {
         [string]$HistoryRoot
     )
 
-    $monthDir = [System.IO.Path]::Combine($OutputDir, $Year, $Month)
+    $monthDir = [System.IO.Path]::Combine($OutputDir, "years", $Year, $Month)
     if (-not (Test-Path $monthDir)) {
         New-Item -Path $monthDir -ItemType Directory -Force | Out-Null
     }
@@ -1135,13 +1135,13 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="../../index.html">&larr; Back to archive</a>
+<a class="back-link" href="../../../index.html">&larr; Back to archive</a>
 <h1>$monthName $Year &mdash; Combined Inventory</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number"><a href="../../computers.html" style="color:inherit;text-decoration:none">$compCount</a></div><div class="label">Computers</div></div>
-    <div class="summary-item"><div class="number"><a href="../../all-software.html" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
-    <div class="summary-item"><div class="number"><a href="../../all-software.html" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../computers.html" style="color:inherit;text-decoration:none">$compCount</a></div><div class="label">Computers</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../all-software.html" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../all-software.html" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
   </div>
   <div class="meta">Computers: $compList &nbsp;|&nbsp; Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
 </div>
@@ -1744,7 +1744,7 @@ function New-WebsiteIndexHtml {
 
     # Also add months from combined index files (backfilled or report-only months)
     $monthIndexes = Get-ChildItem -Path $OutputDir -Recurse -Filter 'index.html' -ErrorAction SilentlyContinue |
-        Where-Object { $_.Directory.Parent.Name -match '^\d{4}$' } |
+        Where-Object { $_.Directory.Parent.Parent.Name -eq 'years' } |
         Sort-Object FullName
     Write-Host "  Found $($monthIndexes.Count) month index.html files"
     foreach ($mi in $monthIndexes) { Write-Host "    - $($mi.FullName)" }
@@ -1752,9 +1752,9 @@ function New-WebsiteIndexHtml {
     foreach ($r in $monthIndexes) {
         $rel = $r.Directory.FullName.Substring($OutputDirNorm.Length + 1)
         $parts = $rel -split '[/\\]'
-        if ($parts.Count -ge 2) {
-            $y = $parts[0]
-            $m = $parts[1]
+        if ($parts.Count -ge 3) {
+            $y = $parts[1]
+            $m = $parts[2]
             if (-not $years[$y]) { $years[$y] = @{} }
             if (-not $years[$y][$m]) { $years[$y][$m] = @() }
             if ($years[$y][$m].Count -eq 0) {
@@ -1787,7 +1787,7 @@ function New-WebsiteIndexHtml {
                 ).Count
             }
             $compLabel = if ($compCount -gt 0) { " ($compCount PCs)" } else { '' }
-            $navHtml += "<a href='./$y/$m/index.html' class='month-link'>$monthName $y$compLabel</a>`n"
+            $navHtml += "<a href='./years/$y/$m/index.html' class='month-link'>$monthName $y$compLabel</a>`n"
         }
         $navHtml += "</div></div>"
     }
@@ -1995,7 +1995,7 @@ function filterLinks() {
       var parts = m.month.split('-');
       var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
       var monthName = monthNames[parseInt(parts[1],10)-1] || parts[1];
-      html += '<div class="search-result-item"><span class="sr-software">' + escHtml(m.name) + '</span><br><a href="./' + parts[0] + '/' + parts[1] + '/index.html" class="sr-month">' + monthName + ' ' + parts[0] + '</a> <span class="sr-computers">(' + escHtml(m.computers.join(', ')) + ')</span></div>';
+      html += '<div class="search-result-item"><span class="sr-software">' + escHtml(m.name) + '</span><br><a href="./years/' + parts[0] + '/' + parts[1] + '/index.html" class="sr-month">' + monthName + ' ' + parts[0] + '</a> <span class="sr-computers">(' + escHtml(m.computers.join(', ')) + ')</span></div>';
     }
     resultsDiv.innerHTML = html;
     resultsDiv.style.display = 'block';
