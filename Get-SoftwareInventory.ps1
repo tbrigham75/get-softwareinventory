@@ -2437,16 +2437,16 @@ if ($healthyRemote.Count -gt 0) {
 
     $remoteScriptBlock = [ScriptBlock]::Create(@"
 function Get-LocalSoftware {
-`$(${function:Get-LocalSoftware})
+$(${function:Get-LocalSoftware})
 }
 function Get-LocalUpdates {
-`$(${function:Get-LocalUpdates})
+$(${function:Get-LocalUpdates})
 }
 function Get-LocalHotfixFallback {
-`$(${function:Get-LocalHotfixFallback})
+$(${function:Get-LocalHotfixFallback})
 }
 function Merge-UpdateDuplicates {
-`$(${function:Merge-UpdateDuplicates})
+$(${function:Merge-UpdateDuplicates})
 }
 `$sw = @(); `$up = @()
 try { `$sw = Get-LocalSoftware } catch { }
