@@ -30,17 +30,20 @@ By default the script reads computer names from `hostnames.txt` (one per line).
 
 ```
 Output\
-├── index.html              Root archive — year/month navigation + failures + "All Software & Patches" link
+├── index.html              Root archive — year/month navigation + search index + page links
 ├── failures.html           Failed computers (separate from inventory data)
 ├── all-software.html       Deduplicated global view of all software and patches across all history
-├── YYYY\
-│   └── MM\
-│       └── index.html      Combined month view — all hosts together, filtered to that month
-└── <Computer>\
+├── computers.html          List of all unique hostnames with per-computer links
+├── hosts\
+│   └── <Computer>\
+│       └── YYYY\
+│           └── MM\
+│               ├── report.html      Per-computer inventory report
+│               └── software-*.csv   (optional) CSV exports
+└── years\
     └── YYYY\
         └── MM\
-            ├── report.html Per-computer detail: software, updates, changes
-            └── snapshot-YYYYMMDD-HHmm.json  Raw persisted data
+            └── index.html  Combined month view — all hosts filtered to that month
 
 History\<Computer>\YYYY\MM\snapshot-*.json    Full snapshot history (one per run)
 ```
@@ -72,6 +75,13 @@ History\<Computer>\YYYY\MM\snapshot-*.json    Full snapshot history (one per run
 ### Navigation PC Count
 - Month buttons in the root index show the number of contributing PCs, falling back to scanning History files if no report entries exist for that month.
 
+### Search Index
+- The root index includes a client-side search index built from all snapshot data — searches software names, versions, update titles, install dates, and computer names.
+- Search results link to the corresponding combined month view, filtered by matching computers.
+
+### Historical Per-Computer Reports
+- When generating the website, the script backfills per-computer HTML reports for every historical month found in the snapshot archive, so hostname links in month reports always work.
+
 ## Key Design Decisions
 
 - **Registry Uninstall keys** (`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`) — does NOT use `Win32_Product`, which triggers MSI self-repair
@@ -94,7 +104,7 @@ History\<Computer>\YYYY\MM\snapshot-*.json    Full snapshot history (one per run
 
 | File | Purpose |
 |------|---------|
-| `Get-SoftwareInventory.ps1` | Main script (~2622 lines, ~25 functions) |
+| `Get-SoftwareInventory.ps1` | Main script (~2597 lines, ~25 functions) |
 | `hostnames.txt` | Default list of computers to inventory |
 | `History\` | Archived JSON snapshots (auto-created) |
 | `Output\` | Generated HTML reports (auto-created) |
