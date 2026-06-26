@@ -1188,11 +1188,11 @@ function New-AllSoftwareHtml {
     foreach ($item in $swEntries) {
         $null = $swSb.Append(@"
 <tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
+    <td><a href="computers.html">$($item.ComputerCount)</a></td>
+    <td>$($item.ComputerList)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
-    <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td>
-    <td><a href="computers.html">$($item.ComputerCount)</a></td>
-    <td>$($item.ComputerList)</td></tr>
+    <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td></tr>
 "@)
     }
     $swRows = $swSb.ToString()
@@ -1248,7 +1248,7 @@ function New-AllSoftwareHtml {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>All Software &amp; Patches - Global Inventory</title>
+<title>All Software &amp; Patches - Inventory Archive</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
   h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
@@ -1378,25 +1378,25 @@ function sortTable(tableId, col) {
   <div class="summary-grid">
     <div class="summary-item">
       <div class="number"><a href="#software-section" style="color:inherit;text-decoration:none">$totalSw</a></div>
-      <div class="label">Unique Software Titles</div>
+      <div class="label">3rd Party Software</div>
     </div>
     <div class="summary-item">
       <div class="number"><a href="#patches-section" style="color:inherit;text-decoration:none">$totalPatches</a></div>
-      <div class="label">Unique Windows Patches</div>
+      <div class="label">Windows Patches</div>
     </div>
   </div>
-  <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; <a href="index.html" class="back-link">&larr; Back to Archive</a></div>
+  <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
 </div>
 
 <h2 class="section-title" id="software-section">3rd Party Software <span class="badge-new">$totalSw</span></h2>
 <input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
 <table id="sw-table"><thead><tr>
   <th onclick="sortTable('sw-table',0)">Name</th>
-  <th onclick="sortTable('sw-table',1)">Version</th>
-  <th onclick="sortTable('sw-table',2)">Publisher</th>
-  <th onclick="sortTable('sw-table',3)">Latest Install Date</th>
-  <th onclick="sortTable('sw-table',4)">Computers</th>
-  <th onclick="sortTable('sw-table',5)">Computer List</th>
+  <th onclick="sortTable('sw-table',1)">Computers</th>
+  <th onclick="sortTable('sw-table',2)">Computer List</th>
+  <th onclick="sortTable('sw-table',3)">Version</th>
+  <th onclick="sortTable('sw-table',4)">Publisher</th>
+  <th onclick="sortTable('sw-table',5)">Install Date</th>
 </tr></thead><tbody>$swRows</tbody></table>
 
 <h2 class="section-title" id="patches-section">Windows Patches <span class="badge-update">$totalPatches</span></h2>
@@ -1405,7 +1405,7 @@ function sortTable(tableId, col) {
   <th onclick="sortTable('patch-table',0)">Title</th>
   <th onclick="sortTable('patch-table',1)">Computers</th>
   <th onclick="sortTable('patch-table',2)">Computer List</th>
-  <th onclick="sortTable('patch-table',3)">Latest Install Date</th>
+  <th onclick="sortTable('patch-table',3)">Install Date</th>
 </tr></thead><tbody>$patchRows</tbody></table>
 </body></html>
 "@
@@ -1493,7 +1493,7 @@ function New-ComputersHtml {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Computers - Global Inventory</title>
+<title>Computers - Inventory Archive</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
   h1, h2, h3 { color: #1a3a5c; }
@@ -1625,12 +1625,11 @@ function sortTable(tableId, col) {
 <h1>Computers</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number">$totalComputers</div><div class="label">Total Computers</div></div>
+    <div class="summary-item"><div class="number"><a href="index.html" style="color:inherit;text-decoration:none">$totalComputers</a></div><div class="label">Total Computers</div></div>
   </div>
   <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
 </div>
 
-<h2 class="section-title">All Hosts</h2>
 <input type="text" id="comp-filter" class="search-box" placeholder="Filter computers..." onkeyup="filterTable('comp-filter','comp-table')">
 <table id="comp-table"><thead><tr>
   <th onclick="sortTable('comp-table',0)">Hostname</th>
