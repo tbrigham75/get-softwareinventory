@@ -70,6 +70,13 @@ function ConvertTo-HtmlEncoded {
     $Value
 }
 
+# Convert a computer name to a safe folder name for filesystem paths
+function ConvertTo-SafeFolderName {
+    param([string]$Name)
+    $folder = $Name -replace '^\.$', 'localhost'
+    $folder -replace '[/\\:*?"<>|]', '_'
+}
+
 
 # Default paths (outside git repo — no system info leaked)
 $webRoot = "C:\Utils\Web\get-softwareinventory"
@@ -442,8 +449,7 @@ function Save-HistorySnapshot {
         $snapDate = $now
     }
 
-    $compFolder = $Computer -replace '^\.$', 'localhost'
-    $compFolder = $compFolder -replace '[/\\:*?"<>|]', '_'
+    $compFolder = ConvertTo-SafeFolderName $Computer
 
     $snapshotDir = [System.IO.Path]::Combine($HistoryRoot, $compFolder, $year, $month)
     if (-not (Test-Path $snapshotDir)) {
@@ -492,7 +498,7 @@ function Load-HistorySnapshot {
         [string]$HistoryRoot
     )
 
-    $compFolder = $Computer -replace '[/\\:*?"<>|]', '_'
+    $compFolder = ConvertTo-SafeFolderName $Computer
     $historyDir = Join-Path $HistoryRoot $compFolder
     if (-not (Test-Path $historyDir)) { return $null }
 
@@ -791,7 +797,7 @@ function sortTable(tableId, col) {
 "@
 
     # Ensure output directory exists
-    $compFolder = $Computer -replace '[/\\:*?"<>|]', '_'
+    $compFolder = ConvertTo-SafeFolderName $Computer
     $outDir = [System.IO.Path]::Combine($OutputDir, "hosts", $compFolder, $year, $month)
     if (-not (Test-Path $outDir)) {
         New-Item -Path $outDir -ItemType Directory -Force | Out-Null
@@ -820,7 +826,7 @@ function New-CsvExport {
     if (-not $Month) { $Month = (Get-Date).ToString('MM') }
     $timestamp = (Get-Date).ToString('yyyyMMdd-HHmm')
 
-    $compFolder = $Computer -replace '[/\\:*?"<>|]', '_'
+    $compFolder = ConvertTo-SafeFolderName $Computer
     $outDir = [System.IO.Path]::Combine($OutputDir, "hosts", $compFolder, $Year, $Month)
     if (-not (Test-Path $outDir)) {
         New-Item -Path $outDir -ItemType Directory -Force | Out-Null
@@ -923,7 +929,7 @@ function New-MonthReportHtml {
     $swSb = New-Object System.Text.StringBuilder
     foreach ($item in $allSoftware | Sort-Object Hostname, Name) {
         $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') { $item.InstallDate } else { 'Unknown' }
-        $cf = $item.Hostname -replace '[/\\:*?"<>|]', '_'
+        $cf = ConvertTo-SafeFolderName $item.Hostname
         $null = $swSb.Append(@"
 <tr><td><a href="../../../hosts/$cf/$Year/$Month/report.html">$(ConvertTo-HtmlEncoded $item.Hostname)</a></td>
     <td>$(ConvertTo-HtmlEncoded $item.Name)</td>
@@ -939,7 +945,7 @@ function New-MonthReportHtml {
     foreach ($item in $allUpdates | Sort-Object Hostname, InstallDate -Descending) {
         $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') { $item.InstallDate } else { 'Unknown' }
         $title = $item.Title
-        $cf = $item.Hostname -replace '[/\\:*?"<>|]', '_'
+        $cf = ConvertTo-SafeFolderName $item.Hostname
         $null = $upSb.Append(@"
 <tr><td><a href="../../../hosts/$cf/$Year/$Month/report.html">$(ConvertTo-HtmlEncoded $item.Hostname)</a></td>
     <td>$(ConvertTo-HtmlEncoded $title)</td>
@@ -1130,7 +1136,7 @@ function New-AllSoftwareHtml {
         try {
             $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
             $snapDate = $file.BaseName -replace '^snapshot-', ''
-            $compFolder = $snap.Computer -replace '[/\\:*?"<>|]', '_'
+            $compFolder = ConvertTo-SafeFolderName $snap.Computer
             $snapYear = $snapDate.Substring(0, 4)
             $snapMonth = $snapDate.Substring(4, 2)
             if (-not $computerLatest.ContainsKey($compFolder) -or $snapDate -gt $computerLatest[$compFolder].SnapDate) {
@@ -1168,7 +1174,7 @@ function New-AllSoftwareHtml {
             $compCount = $compNames.Count
             $compLinks = @{}
             foreach ($cn in $compNames) {
-                $cf = $cn -replace '[/\\:*?"<>|]', '_'
+                $cf = ConvertTo-SafeFolderName $cn
                 if ($computerLatest.ContainsKey($cf)) {
                     $cl = $computerLatest[$cf]
     $compLinks[$cn] = "<a href='./hosts/$cf/$($cl.Year)/$($cl.Month)/report.html'>$(ConvertTo-HtmlEncoded $cn)</a>"
@@ -1216,7 +1222,7 @@ function New-AllSoftwareHtml {
             $compCount = $compNames.Count
             $compLinks = @{}
             foreach ($cn in $compNames) {
-                $cf = $cn -replace '[/\\:*?"<>|]', '_'
+                $cf = ConvertTo-SafeFolderName $cn
                 if ($computerLatest.ContainsKey($cf)) {
                     $cl = $computerLatest[$cf]
                     $compLinks[$cn] = "<a href='./hosts/$cf/$($cl.Year)/$($cl.Month)/report.html'>$(ConvertTo-HtmlEncoded $cn)</a>"
@@ -2431,10 +2437,16 @@ foreach ($computer in $localHosts) {
     $sw = @(); $up = @()
     Write-Host "  Collecting software (registry)..."
     try { $sw = Get-SoftwareInventory -Computer $computer; Write-Host "    Found $($sw.Count) software entries" }
-    catch { Write-Warning "    Software inventory failed for $computer : $_" }
+    catch {
+        Write-Warning "    Software inventory failed for $computer : $_"
+        $failures += [PSCustomObject]@{ Computer = $computer; Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; Errors = "Software collection failed: $_" }
+    }
     Write-Host "  Collecting updates (WUA)..."
     try { $up = Get-InstalledUpdates -Computer $computer; Write-Host "    Found $($up.Count) updates" }
-    catch { Write-Warning "    Update query failed for $computer : $_" }
+    catch {
+        Write-Warning "    Update query failed for $computer : $_"
+        $failures += [PSCustomObject]@{ Computer = $computer; Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; Errors = "Update collection failed: $_" }
+    }
     $allResults += [PSCustomObject]@{ Computer = $computer; Software = $sw; Updates = $up }
 }
 
@@ -2460,11 +2472,11 @@ $(${function:Merge-SoftwareDuplicates})
 function Merge-UpdateDuplicates {
 $(${function:Merge-UpdateDuplicates})
 }
-`$sw = @(); `$up = @()
-try { `$sw = Get-LocalSoftware } catch { }
-try { `$up = Get-LocalUpdates } catch { }
+`$sw = @(); `$up = @(); `$errMsg = @()
+try { `$sw = Get-LocalSoftware } catch { Write-Warning "Remote software collection failed on `$env:COMPUTERNAME`: $_"; `$errMsg += "Software: $_" }
+try { `$up = Get-LocalUpdates } catch { Write-Warning "Remote update collection failed on `$env:COMPUTERNAME`: $_"; `$errMsg += "Updates: $_" }
 if (`$up) { `$up = Merge-UpdateDuplicates `$up }
-@{ Software = `$sw; Updates = `$up }
+@{ Software = `$sw; Updates = `$up; Error = ($errMsg -join '; ') }
 "@)
 
     $remoteResults = Invoke-Command -ComputerName $healthyRemote -ScriptBlock $remoteScriptBlock `
@@ -2475,6 +2487,13 @@ if (`$up) { `$up = Merge-UpdateDuplicates `$up }
             Computer = $r.PSComputerName
             Software = $r.Software
             Updates  = $r.Updates
+        }
+        if ($r.Error) {
+            $failures += [PSCustomObject]@{
+                Computer  = $r.PSComputerName
+                Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+                Errors    = $r.Error
+            }
         }
     }
     if ($remoteErrors) {
