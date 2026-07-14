@@ -129,7 +129,16 @@ function Get-SoftwareInventory {
         for ($attempt = 1; $attempt -le $script:RetryCount; $attempt++) {
             try {
                 $session = New-PSSession -ComputerName $Computer -ErrorAction Stop
-                $result = Invoke-Command -Session $session -ScriptBlock ${function:Get-LocalSoftware} -ErrorAction Stop
+                $remoteSb = [ScriptBlock]::Create(@"
+function Merge-SoftwareDuplicates {
+$(${function:Merge-SoftwareDuplicates})
+}
+function Get-LocalSoftware {
+$(${function:Get-LocalSoftware})
+}
+Get-LocalSoftware
+"@)
+                $result = Invoke-Command -Session $session -ScriptBlock $remoteSb -ErrorAction Stop
                 Remove-PSSession $session
                 break
             } catch {
@@ -2444,6 +2453,9 @@ $(${function:Get-LocalUpdates})
 }
 function Get-LocalHotfixFallback {
 $(${function:Get-LocalHotfixFallback})
+}
+function Merge-SoftwareDuplicates {
+$(${function:Merge-SoftwareDuplicates})
 }
 function Merge-UpdateDuplicates {
 $(${function:Merge-UpdateDuplicates})
