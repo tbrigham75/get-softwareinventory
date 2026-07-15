@@ -34,6 +34,7 @@ param(
 # ============================================================
 
 $scriptVersion = '1.0'
+$dataPath      = Join-Path $SharePath "inventory"
 
 # ---------------------------------------------------------------
 # Resolve the directory this script lives in
@@ -151,13 +152,13 @@ if (-not (Test-Path $SharePath)) {
 # Step 2 — Scan for host folders
 # ---------------------------------------------------------------
 Write-Host "Scanning for host folders..."
-$hostFolders = Get-ChildItem -Path $SharePath -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ne '_logs' -and $_.Name -notmatch '^\.' }
+$hostFolders = Get-ChildItem -Path $dataPath -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notmatch '^\.' }
 
 Write-Host "  Found $($hostFolders.Count) host folder(s)."
 
 if ($hostFolders.Count -eq 0) {
-    Write-Warning "No host folders found in $SharePath — nothing to index."
+    Write-Warning "No host folders found in $dataPath — nothing to index."
     exit 0
 }
 
@@ -172,7 +173,7 @@ $allUpdateTitles  = [System.Collections.Generic.HashSet[string]]::new()
 foreach ($folder in $hostFolders) {
     $hostName = $folder.Name
     try {
-        $snapshot = Load-HistorySnapshot -Computer $hostName -HistoryRoot $SharePath
+        $snapshot = Load-HistorySnapshot -Computer $hostName -HistoryRoot $dataPath
         if ($snapshot) {
             $swCount = if ($snapshot.SoftwareCount) { $snapshot.SoftwareCount } else { 0 }
             $upCount = if ($snapshot.UpdateCount) { $snapshot.UpdateCount } else { 0 }
@@ -274,7 +275,7 @@ foreach ($y in $sortedYears) {
 
         foreach ($hostName in $hostsInMonth) {
             $compFolder = ConvertTo-SafeFolderName $hostName
-            $snapDir = [System.IO.Path]::Combine($SharePath, $compFolder, $y, $m)
+            $snapDir = [System.IO.Path]::Combine($dataPath, $compFolder, $y, $m)
             if (-not (Test-Path $snapDir)) { continue }
 
             $snapFiles = Get-ChildItem -Path $snapDir -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue |
@@ -323,7 +324,7 @@ foreach ($y in $sortedYears) {
         foreach ($item in ($allSw | Sort-Object Hostname, Name)) {
             $cf = ConvertTo-SafeFolderName $item.Hostname
             $null = $swSb.Append(@"
-<tr><td><a href="../../$cf/$y/$m/report.html">$(ConvertTo-HtmlEncoded $item.Hostname)</a></td>
+<tr><td><a href="../../../inventory/$cf/$y/$m/report.html">$(ConvertTo-HtmlEncoded $item.Hostname)</a></td>
     <td>$(ConvertTo-HtmlEncoded $item.Name)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
     <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
@@ -337,7 +338,7 @@ foreach ($y in $sortedYears) {
         foreach ($item in ($allUp | Sort-Object Hostname, InstallDate -Descending)) {
             $cf = ConvertTo-SafeFolderName $item.Hostname
             $null = $upSb.Append(@"
-<tr><td><a href="../../$cf/$y/$m/report.html">$(ConvertTo-HtmlEncoded $item.Hostname)</a></td>
+<tr><td><a href="../../../inventory/$cf/$y/$m/report.html">$(ConvertTo-HtmlEncoded $item.Hostname)</a></td>
     <td>$(ConvertTo-HtmlEncoded $item.Title)</td>
     <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td></tr>
 "@)
@@ -480,7 +481,7 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="../index.html">&larr; Back to index</a>
+<a class="back-link" href="../../../index.html">&larr; Back to index</a>
 <h1>$monthLabel</h1>
 <div class="summary">
   <div class="summary-grid">

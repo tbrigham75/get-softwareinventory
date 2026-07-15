@@ -39,6 +39,7 @@ param(
 
 $scriptVersion = '1.0'
 $computerName  = $env:COMPUTERNAME
+$dataPath      = Join-Path $SharePath "inventory"
 
 # ---------------------------------------------------------------
 # Resolve the directory this script lives in
@@ -550,7 +551,7 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="../../../index.html">&larr; Back to inventory</a>
+<a class="back-link" href="../../../../index.html">&larr; Back to inventory</a>
 <h1>Software Inventory Report</h1>
 <div class="summary">
   <div class="summary-grid">
@@ -657,7 +658,7 @@ try {
 # ---------------------------------------------------------------
 Write-Host "Saving snapshot..."
 try {
-    Save-HistorySnapshot -Computer $computerName -Software $software -Updates $updates -HistoryRoot $SharePath
+    Save-HistorySnapshot -Computer $computerName -Software $software -Updates $updates -HistoryRoot $dataPath
 } catch {
     $msg = "Snapshot save failed for $computerName : $_"
     Write-Warning $msg
@@ -669,7 +670,7 @@ try {
 # ---------------------------------------------------------------
 Write-Host "Generating HTML report..."
 try {
-    New-LocalHtmlReport -Computer $computerName -Software $software -Updates $updates -OutputDir $SharePath
+    New-LocalHtmlReport -Computer $computerName -Software $software -Updates $updates -OutputDir $dataPath
 } catch {
     $msg = "HTML report generation failed for $computerName : $_"
     Write-Warning $msg
@@ -682,7 +683,7 @@ try {
 if ($ExportCsv) {
     Write-Host "Exporting CSV..."
     try {
-        New-CsvExport -Computer $computerName -Software $software -Updates $updates -ShareRoot $SharePath
+        New-CsvExport -Computer $computerName -Software $software -Updates $updates -ShareRoot $dataPath
     } catch {
         $msg = "CSV export failed for $computerName : $_"
         Write-Warning $msg
