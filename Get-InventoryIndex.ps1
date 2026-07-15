@@ -99,6 +99,26 @@ function ConvertTo-SafeFolderName {
     $folder -replace '[/\\:*?"<>|]', '_'
 }
 
+# ---------------------------------------------------------------
+# Normalize a software/update name for deduplication
+# Strips version numbers, architecture suffixes, and parenthetical
+# qualifiers so that e.g. "7-Zip 23.01 (x64)" and "7-Zip 23.01"
+# both normalize to "7-zip".
+# ---------------------------------------------------------------
+function Normalize-SoftwareName {
+    param([string]$Name)
+    if (-not $Name) { return '' }
+    $n = $Name
+    # Strip parenthetical qualifiers: (x64), (Machine), (WOW64), etc.
+    $n = $n -replace '\s*\([^)]*\)\s*', ' '
+    # Strip common architecture suffixes at end of name
+    $n = $n -replace '\s+(x86|x64|32-bit|64-bit|arm64)\s*$', ''
+    # Strip trailing version numbers: 23.01, 4.8.1, v12.0, etc.
+    $n = $n -replace '\s+[vV]?\d+(\.\d+){1,5}\s*$', ''
+    # Collapse whitespace, trim, lowercase
+    ($n -replace '\s+', ' ').Trim().ToLower()
+}
+
 # ============================================================
 # SNAPSHOT LOADER — copied verbatim from Get-SoftwareInventory.ps1
 # ============================================================
@@ -382,8 +402,8 @@ function sortTable(tableId, col) {
 <h1>Software Inventory Report</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number">$totalSw</div><div class="label">3rd Party Software</div></div>
-    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Windows Patches</div></div>
+    <div class="summary-item"><div class="number"><a href="#allSw-table" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number"><a href="#allUp-table" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
   </div>
   <div class="meta">Computer: <strong>$(ConvertTo-HtmlEncoded $Computer)</strong> &nbsp;|&nbsp; Generated: $reportDate &nbsp;|&nbsp; Snapshot: $anchor</div>
 </div>
@@ -526,6 +546,325 @@ function Backfill-HistoryMonths {
     $backfilled
 }
 
+# ---------------------------------------------------------------
+# New-AllSoftwareIndexHtml
+# Generates all-software.html at the share root with deduplicated
+# software and patches across all hosts, with computer lists.
+# Adapted from Get-RemoteInventory.ps1 New-AllSoftwareHtml.
+# ---------------------------------------------------------------
+function New-AllSoftwareIndexHtml {
+    param(
+        [string]$DataPath,
+        [string]$SharePath
+    )
+
+    # Load latest snapshot per host
+    $hostFolders = Get-ChildItem -Path $DataPath -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch '^\.' }
+    if ($hostFolders.Count -eq 0) { return }
+
+    [System.Collections.ArrayList]$allSoftware = @()
+    [System.Collections.ArrayList]$allPatches = @()
+    $hostReportPaths = @{}
+
+    foreach ($folder in $hostFolders) {
+        $hostName = $folder.Name
+        $snapshot = Load-HistorySnapshot -Computer $hostName -HistoryRoot $DataPath
+        if (-not $snapshot) { continue }
+
+        # Find latest report path for this host
+        $reportFiles = Get-ChildItem -Path $folder.FullName -Recurse -Filter 'report.html' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending
+        if ($reportFiles.Count -gt 0) {
+            $hostReportPaths[$hostName] = $reportFiles[0].FullName.Substring($SharePath.Length + 1)
+        }
+
+        foreach ($sw in $snapshot.Software) {
+            $null = $allSoftware.Add([PSCustomObject]@{
+                Name        = $sw.Name
+                Version     = $sw.Version
+                Publisher   = $sw.Publisher
+                InstallDate = if ($sw.InstallDate) { $sw.InstallDate } else { 'Unknown' }
+                Computer    = $hostName
+            })
+        }
+        foreach ($up in $snapshot.Updates) {
+            $null = $allPatches.Add([PSCustomObject]@{
+                Title       = $up.Title
+                InstallDate = if ($up.InstallDate) { $up.InstallDate } else { 'Unknown' }
+                Computer    = $hostName
+            })
+        }
+    }
+
+    # --- Software dedup ---
+    $swEntries = @()
+    if ($allSoftware.Count -gt 0) {
+        $grouped = $allSoftware | Group-Object -Property { Normalize-SoftwareName $_.Name }
+        foreach ($g in $grouped) {
+            $items = $g.Group
+            $compNames = $items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object
+            $compCount = $compNames.Count
+            $compLinks = @{}
+            foreach ($cn in $compNames) {
+                if ($hostReportPaths.ContainsKey($cn)) {
+                    $compLinks[$cn] = "<a href='$($hostReportPaths[$cn])'>$(ConvertTo-HtmlEncoded $cn)</a>"
+                } else {
+                    $compLinks[$cn] = $(ConvertTo-HtmlEncoded $cn)
+                }
+            }
+            $computers = ($compNames | ForEach-Object { $compLinks[$_] }) -join ', '
+            $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.Name } -Descending |
+                Select-Object -First 1
+            $latestInstallDate = $items | Sort-Object { if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate } } -Descending | Select-Object -First 1
+            $swEntries += [PSCustomObject]@{
+                Name          = $items[0].Name
+                Version       = $latest.Version
+                Publisher     = $latest.Publisher
+                InstallDate   = $latestInstallDate.InstallDate
+                ComputerList  = $computers
+                ComputerCount = $compCount
+            }
+        }
+        $swEntries = $swEntries | Sort-Object Name
+    }
+    $totalSw = $swEntries.Count
+
+    $swSb = New-Object System.Text.StringBuilder
+    foreach ($item in $swEntries) {
+        $null = $swSb.Append(@"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
+    <td>$($item.ComputerCount)</td>
+    <td>$($item.ComputerList)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td></tr>
+"@)
+    }
+    $swRows = $swSb.ToString()
+
+    # --- Patch dedup ---
+    $patchEntries = @()
+    if ($allPatches.Count -gt 0) {
+        $grouped = $allPatches | Group-Object -Property { Normalize-SoftwareName $_.Title }
+        foreach ($g in $grouped) {
+            $items = $g.Group
+            $compNames = $items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object
+            $compCount = $compNames.Count
+            $compLinks = @{}
+            foreach ($cn in $compNames) {
+                if ($hostReportPaths.ContainsKey($cn)) {
+                    $compLinks[$cn] = "<a href='$($hostReportPaths[$cn])'>$(ConvertTo-HtmlEncoded $cn)</a>"
+                } else {
+                    $compLinks[$cn] = $(ConvertTo-HtmlEncoded $cn)
+                }
+            }
+            $computers = ($compNames | ForEach-Object { $compLinks[$_] }) -join ', '
+            $latest = $items | Sort-Object {
+                if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate }
+            } -Descending | Select-Object -First 1
+            $patchEntries += [PSCustomObject]@{
+                Title         = $items[0].Title
+                InstallDate   = $latest.InstallDate
+                ComputerList  = $computers
+                ComputerCount = $compCount
+            }
+        }
+        $patchEntries = $patchEntries | Sort-Object Title
+    }
+    $totalPatches = $patchEntries.Count
+
+    $patchSb = New-Object System.Text.StringBuilder
+    foreach ($item in $patchEntries) {
+        $null = $patchSb.Append(@"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Title)</td>
+    <td>$($item.ComputerCount)</td>
+    <td>$($item.ComputerList)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.InstallDate)</td></tr>
+"@)
+    }
+    $patchRows = $patchSb.ToString()
+
+    $now = Get-Date
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>All Software &amp; Patches - Network Inventory</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
+  .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 10px; margin-bottom: 15px; }
+  .summary-item { background: #e8f0fe; padding: 10px; border-radius: 4px; text-align: center; }
+  .summary-item .number { font-size: 24px; font-weight: bold; color: #1a3a5c; }
+  .summary-item .label { font-size: 13px; color: #666; }
+  .section-title { margin: 25px 0 10px 0; }
+  .badge-new { display: inline-block; background: #2e7d32; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge-update { display: inline-block; background: #1565c0; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .meta { font-size: 13px; color: #888; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
+  th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
+  th:hover { background: #2a5a8c; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; word-break: break-word; }
+  tr:hover td { background: #f0f5ff; }
+  .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
+  .search-box:focus { outline: none; border-color: #1a3a5c; box-shadow: 0 0 4px rgba(26,58,92,.3); }
+  a.back-link { color: #1a3a5c; text-decoration: none; }
+  a.back-link:hover { text-decoration: underline; }
+  .theme-toggle { float: right; background: none; border: 1px solid #1a3a5c; color: #1a3a5c; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { background: #1a3a5c; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    html.theme-auto body { background: #1a1a2e; color: #e0e0e0; }
+    html.theme-auto body h1 { color: #80b0e0; }
+    html.theme-auto body .summary { background: #16213e; }
+    html.theme-auto body .summary-item { background: #0f3460; }
+    html.theme-auto body .summary-item .number { color: #80b0e0; }
+    html.theme-auto body table { background: #16213e; }
+    html.theme-auto body th { background: #0f3460; }
+    html.theme-auto body td { border-bottom: 1px solid #2a3a5e; }
+    html.theme-auto body tr:hover td { background: #1a2a4e; }
+    html.theme-auto body .meta { color: #888; }
+    html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+    html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+  }
+  html.dark body { background: #1a1a2e; color: #e0e0e0; }
+  html.dark body h1 { color: #80b0e0; }
+  html.dark body .summary { background: #16213e; }
+  html.dark body .summary-item { background: #0f3460; }
+  html.dark body .summary-item .number { color: #80b0e0; }
+  html.dark body table { background: #16213e; }
+  html.dark body th { background: #0f3460; }
+  html.dark body td { border-bottom: 1px solid #2a3a5e; }
+  html.dark body tr:hover td { background: #1a2a4e; }
+  html.dark body .meta { color: #888; }
+  html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+  html.dark body .search-box:focus { border-color: #80b0e0; }
+</style>
+<script>
+function toggleTheme() {
+  var theme = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+  document.documentElement.classList.toggle('dark');
+  document.documentElement.classList.remove('theme-auto');
+  localStorage.setItem('theme', theme);
+  var links = document.querySelectorAll('a');
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute('href');
+    if (!href || href.indexOf('://') >= 0 || href.indexOf('#') >= 0) continue;
+    href = href.replace(/[?&]theme=\w+/g, '');
+    href += (href.indexOf('?') >= 0 ? '&' : '?') + 'theme=' + theme;
+    links[i].setAttribute('href', href);
+  }
+}
+(function() {
+  try {
+    var m = window.location.search.match(/[?&]theme=(\w+)/);
+    if (m && m[1] === 'dark') { document.documentElement.classList.add('dark'); return; }
+    if (m && m[1] === 'light') { document.documentElement.classList.remove('dark', 'theme-auto'); return; }
+    var saved = localStorage.getItem('theme');
+    if (saved === 'dark') { document.documentElement.classList.add('dark'); return; }
+    if (saved === 'light') { document.documentElement.classList.remove('dark', 'theme-auto'); return; }
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('theme-auto');
+  } catch(e) {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('dark');
+  }
+})();
+document.addEventListener('click',function(e){
+  var el=e.target;
+  while(el&&el.tagName!=='A')el=el.parentNode;
+  if(!el)return;
+  var href=el.getAttribute('href');
+  if(!href||href.indexOf('://')>=0||href.indexOf('#')>=0||href.indexOf('?theme=')>=0)return;
+  var theme=document.documentElement.classList.contains('dark')?'dark':'light';
+  el.href=href+(href.indexOf('?')>=0?'&':'?')+'theme='+theme;
+});
+function filterTable(inputId, tableId) {
+  var input = document.getElementById(inputId);
+  var filter = input.value.toUpperCase();
+  var table = document.getElementById(tableId);
+  var rows = table.getElementsByTagName('tr');
+  for (var i = 1; i < rows.length; i++) {
+    var cells = rows[i].getElementsByTagName('td');
+    var show = false;
+    for (var j = 0; j < cells.length; j++) {
+      if (cells[j].textContent.toUpperCase().indexOf(filter) > -1) { show = true; break; }
+    }
+    rows[i].style.display = show ? '' : 'none';
+  }
+}
+function sortTable(tableId, col) {
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  var dir = table.getAttribute('data-sort-dir-' + col) === 'asc' ? 'desc' : 'asc';
+  table.setAttribute('data-sort-dir-' + col, dir);
+  var multiplier = dir === 'asc' ? 1 : -1;
+  rows.sort(function(a, b) {
+    var aText = a.children[col].textContent.trim();
+    var bText = b.children[col].textContent.trim();
+    var aDate = Date.parse(aText);
+    var bDate = Date.parse(bText);
+    if (!isNaN(aDate) && !isNaN(bDate)) return (aDate - bDate) * multiplier;
+    return aText.localeCompare(bText, undefined, { numeric: true }) * multiplier;
+  });
+  rows.forEach(function(row) { tbody.appendChild(row); });
+}
+</script>
+</head>
+<body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
+<a class="back-link" href="index.html">&larr; Back to index</a>
+<h1>All Software &amp; Patches</h1>
+<div class="summary">
+  <div class="summary-grid">
+    <div class="summary-item">
+      <div class="number"><a href="#software-section" style="color:inherit;text-decoration:none">$totalSw</a></div>
+      <div class="label">3rd Party Software</div>
+    </div>
+    <div class="summary-item">
+      <div class="number"><a href="#patches-section" style="color:inherit;text-decoration:none">$totalPatches</a></div>
+      <div class="label">Windows Patches</div>
+    </div>
+  </div>
+  <div class="meta">Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
+</div>
+
+<h2 class="section-title" id="software-section">3rd Party Software <span class="badge-new">$totalSw</span></h2>
+<input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
+<table id="sw-table"><thead><tr>
+  <th onclick="sortTable('sw-table',0)">Name</th>
+  <th onclick="sortTable('sw-table',1)">Computers</th>
+  <th onclick="sortTable('sw-table',2)">Computer List</th>
+  <th onclick="sortTable('sw-table',3)">Version</th>
+  <th onclick="sortTable('sw-table',4)">Publisher</th>
+  <th onclick="sortTable('sw-table',5)">Install Date</th>
+</tr></thead><tbody>$swRows</tbody></table>
+
+<h2 class="section-title" id="patches-section">Windows Patches <span class="badge-update">$totalPatches</span></h2>
+<input type="text" id="patch-filter" class="search-box" placeholder="Filter patches..." onkeyup="filterTable('patch-filter','patch-table')">
+<table id="patch-table"><thead><tr>
+  <th onclick="sortTable('patch-table',0)">Title</th>
+  <th onclick="sortTable('patch-table',1)">Computers</th>
+  <th onclick="sortTable('patch-table',2)">Computer List</th>
+  <th onclick="sortTable('patch-table',3)">Install Date</th>
+</tr></thead><tbody>$patchRows</tbody></table>
+</body></html>
+"@
+
+    $outputFile = Join-Path $SharePath "all-software.html"
+    try {
+        $html | Out-File -FilePath $outputFile -Encoding utf8
+        Write-Host "  All Software & Patches page saved: $outputFile"
+    } catch {
+        $msg = "Failed to write all-software.html: $_"
+        Write-Warning $msg
+        Write-Log $msg
+    }
+}
+
 # ============================================================
 # MAIN EXECUTION
 # ============================================================
@@ -575,12 +914,12 @@ foreach ($folder in $hostFolders) {
 
             # Collect unique software names across all hosts
             foreach ($sw in $snapshot.Software) {
-                $norm = ($sw.Name -replace '\s+', ' ').Trim().ToLower()
+                $norm = Normalize-SoftwareName $sw.Name
                 if ($norm) { [void]$allSoftwareNames.Add($norm) }
             }
             # Collect unique update titles across all hosts
             foreach ($up in $snapshot.Updates) {
-                $norm = ($up.Title -replace '\s+', ' ').Trim().ToLower()
+                $norm = Normalize-SoftwareName $up.Title
                 if ($norm) { [void]$allUpdateTitles.Add($norm) }
             }
 
@@ -627,6 +966,13 @@ if ($backfilled.Count -gt 0) {
 } else {
     Write-Host "  No months needed backfilling."
 }
+
+# ---------------------------------------------------------------
+# Step 3c — Generate all-software.html
+# ---------------------------------------------------------------
+Write-Host ""
+Write-Host "Generating all-software page..."
+New-AllSoftwareIndexHtml -DataPath $dataPath -SharePath $SharePath
 
 # ---------------------------------------------------------------
 # Step 3b — Backfill per-computer reports for all snapshots
@@ -932,8 +1278,8 @@ function sortTable(tableId, col) {
 <div class="summary">
   <div class="summary-grid">
     <div class="summary-item"><div class="number">$compCount</div><div class="label">Hosts</div></div>
-    <div class="summary-item"><div class="number">$totalSw</div><div class="label">Software Installed</div></div>
-    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Updates Installed</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../all-software.html#software-section" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">Software Installed</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../all-software.html#patches-section" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Updates Installed</div></div>
   </div>
   <div class="meta">Hosts: $(ConvertTo-HtmlEncoded $compList)</div>
 </div>
@@ -1158,9 +1504,9 @@ function sortTable(tableId, col) {
 <h1>Software Inventory &mdash; Network Index</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number">$($hostEntries.Count)</div><div class="label">Hosts</div></div>
-    <div class="summary-item"><div class="number">$($allSoftwareNames.Count)</div><div class="label">Unique Software Titles</div></div>
-    <div class="summary-item"><div class="number">$($allUpdateTitles.Count)</div><div class="label">Unique Update Titles</div></div>
+    <div class="summary-item"><div class="number"><a href="#host-table" style="color:inherit;text-decoration:none">$($hostEntries.Count)</a></div><div class="label">Hosts</div></div>
+    <div class="summary-item"><div class="number"><a href="all-software.html#software-section" style="color:inherit;text-decoration:none">$($allSoftwareNames.Count)</a></div><div class="label">Unique Software Titles</div></div>
+    <div class="summary-item"><div class="number"><a href="all-software.html#patches-section" style="color:inherit;text-decoration:none">$($allUpdateTitles.Count)</a></div><div class="label">Unique Update Titles</div></div>
   </div>
   <div class="meta">Generated: $reportDate &nbsp;|&nbsp; Last scan: $(ConvertTo-HtmlEncoded $lastScanDate)</div>
 </div>

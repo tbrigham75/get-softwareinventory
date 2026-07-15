@@ -555,8 +555,8 @@ function sortTable(tableId, col) {
 <h1>Software Inventory Report</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number">$totalSw</div><div class="label">3rd Party Software</div></div>
-    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Windows Patches</div></div>
+    <div class="summary-item"><div class="number"><a href="#allSw-table" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number"><a href="#allUp-table" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
   </div>
   <div class="meta">Computer: <strong>$(ConvertTo-HtmlEncoded $Computer)</strong> &nbsp;|&nbsp; Generated: $reportDate &nbsp;|&nbsp; Snapshot: $anchor</div>
 </div>
