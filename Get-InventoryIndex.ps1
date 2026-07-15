@@ -558,42 +558,51 @@ function New-AllSoftwareIndexHtml {
         [string]$SharePath
     )
 
-    # Load latest snapshot per host
-    $hostFolders = Get-ChildItem -Path $DataPath -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notmatch '^\.' }
-    if ($hostFolders.Count -eq 0) { return }
+    # Scan ALL snapshot files across all hosts and months
+    $snapshotFiles = Get-ChildItem -Path $DataPath -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+    if ($snapshotFiles.Count -eq 0) { return }
 
     [System.Collections.ArrayList]$allSoftware = @()
     [System.Collections.ArrayList]$allPatches = @()
     $hostReportPaths = @{}
 
-    foreach ($folder in $hostFolders) {
-        $hostName = $folder.Name
-        $snapshot = Load-HistorySnapshot -Computer $hostName -HistoryRoot $DataPath
-        if (-not $snapshot) { continue }
+    foreach ($file in $snapshotFiles) {
+        try {
+            $snap = Get-Content -Path $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            $hostName = $snap.Computer
+            if (-not $hostName) { continue }
 
-        # Find latest report path for this host
-        $reportFiles = Get-ChildItem -Path $folder.FullName -Recurse -Filter 'report.html' -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending
-        if ($reportFiles.Count -gt 0) {
-            $hostReportPaths[$hostName] = $reportFiles[0].FullName.Substring($SharePath.Length + 1)
-        }
+            # Track latest report path per host
+            if (-not $hostReportPaths.ContainsKey($hostName)) {
+                $compFolder = ConvertTo-SafeFolderName $hostName
+                $compDir = Join-Path $DataPath $compFolder
+                if (Test-Path $compDir) {
+                    $reportFiles = Get-ChildItem -Path $compDir -Recurse -Filter 'report.html' -ErrorAction SilentlyContinue |
+                        Sort-Object LastWriteTime -Descending
+                    if ($reportFiles.Count -gt 0) {
+                        $hostReportPaths[$hostName] = $reportFiles[0].FullName.Substring($SharePath.Length + 1)
+                    }
+                }
+            }
 
-        foreach ($sw in $snapshot.Software) {
-            $null = $allSoftware.Add([PSCustomObject]@{
-                Name        = $sw.Name
-                Version     = $sw.Version
-                Publisher   = $sw.Publisher
-                InstallDate = if ($sw.InstallDate) { $sw.InstallDate } else { 'Unknown' }
-                Computer    = $hostName
-            })
-        }
-        foreach ($up in $snapshot.Updates) {
-            $null = $allPatches.Add([PSCustomObject]@{
-                Title       = $up.Title
-                InstallDate = if ($up.InstallDate) { $up.InstallDate } else { 'Unknown' }
-                Computer    = $hostName
-            })
+            foreach ($sw in $snap.Software) {
+                $null = $allSoftware.Add([PSCustomObject]@{
+                    Name        = $sw.Name
+                    Version     = $sw.Version
+                    Publisher   = $sw.Publisher
+                    InstallDate = if ($sw.InstallDate) { $sw.InstallDate } else { 'Unknown' }
+                    Computer    = $hostName
+                })
+            }
+            foreach ($up in $snap.Updates) {
+                $null = $allPatches.Add([PSCustomObject]@{
+                    Title       = $up.Title
+                    InstallDate = if ($up.InstallDate) { $up.InstallDate } else { 'Unknown' }
+                    Computer    = $hostName
+                })
+            }
+        } catch {
+            # skip corrupt snapshots
         }
     }
 
@@ -901,8 +910,6 @@ if ($hostFolders.Count -eq 0) {
 # ---------------------------------------------------------------
 Write-Host "Reading host snapshots..."
 $hostEntries = @()
-$allSoftwareNames = [System.Collections.Generic.HashSet[string]]::new()
-$allUpdateTitles  = [System.Collections.Generic.HashSet[string]]::new()
 
 foreach ($folder in $hostFolders) {
     $hostName = $folder.Name
@@ -911,17 +918,6 @@ foreach ($folder in $hostFolders) {
         if ($snapshot) {
             $swCount = if ($snapshot.SoftwareCount) { $snapshot.SoftwareCount } else { 0 }
             $upCount = if ($snapshot.UpdateCount) { $snapshot.UpdateCount } else { 0 }
-
-            # Collect unique software names across all hosts
-            foreach ($sw in $snapshot.Software) {
-                $norm = Normalize-SoftwareName $sw.Name
-                if ($norm) { [void]$allSoftwareNames.Add($norm) }
-            }
-            # Collect unique update titles across all hosts
-            foreach ($up in $snapshot.Updates) {
-                $norm = Normalize-SoftwareName $up.Title
-                if ($norm) { [void]$allUpdateTitles.Add($norm) }
-            }
 
             # Find the latest report.html for this host
             $reportFiles = Get-ChildItem -Path $folder.FullName -Recurse -Filter 'report.html' -ErrorAction SilentlyContinue |
@@ -949,11 +945,36 @@ foreach ($folder in $hostFolders) {
     }
 }
 
+# ---------------------------------------------------------------
+# Step 3a — Scan ALL snapshots for unique software/update counts
+# ---------------------------------------------------------------
+Write-Host ""
+Write-Host "Scanning all snapshots for unique counts..."
+$allSoftwareNames = [System.Collections.Generic.HashSet[string]]::new()
+$allUpdateTitles  = [System.Collections.Generic.HashSet[string]]::new()
+
+$snapshotFiles = Get-ChildItem -Path $dataPath -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+foreach ($file in $snapshotFiles) {
+    try {
+        $snap = Get-Content -Path $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($sw in $snap.Software) {
+            $norm = Normalize-SoftwareName $sw.Name
+            if ($norm) { [void]$allSoftwareNames.Add($norm) }
+        }
+        foreach ($up in $snap.Updates) {
+            $norm = Normalize-SoftwareName $up.Title
+            if ($norm) { [void]$allUpdateTitles.Add($norm) }
+        }
+    } catch {
+        # skip corrupt snapshots
+    }
+}
+
 Write-Host ""
 Write-Host "  Total: $($hostEntries.Count) host(s), $($allSoftwareNames.Count) unique software titles, $($allUpdateTitles.Count) unique update titles"
 
 # ---------------------------------------------------------------
-# Step 3a — Backfill missing months in current year
+# Step 3b — Backfill missing months in current year
 # ---------------------------------------------------------------
 $now = Get-Date
 $currentYear = $now.ToString('yyyy')
@@ -975,7 +996,7 @@ Write-Host "Generating all-software page..."
 New-AllSoftwareIndexHtml -DataPath $dataPath -SharePath $SharePath
 
 # ---------------------------------------------------------------
-# Step 3b — Backfill per-computer reports for all snapshots
+# Step 3d — Backfill per-computer reports for all snapshots
 # ---------------------------------------------------------------
 Write-Host ""
 Write-Host "Backfilling per-computer reports..."
@@ -1011,7 +1032,7 @@ foreach ($compDir in $histComputers) {
 Write-Host "  Generated $reportCount historical report(s)."
 
 # ---------------------------------------------------------------
-# Step 3c — Discover year/month combinations from host folders
+# Step 3e — Discover year/month combinations from host folders
 # ---------------------------------------------------------------
 Write-Host "Discovering year/month combinations..."
 $years = @{}
