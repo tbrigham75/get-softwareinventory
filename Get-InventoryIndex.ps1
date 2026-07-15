@@ -131,6 +131,401 @@ function Load-HistorySnapshot {
     }
 }
 
+# ---------------------------------------------------------------
+# Save-HistorySnapshot
+# Saves inventory data as timestamped JSON under HistoryRoot/<host>/<YYYY>/<MM>/
+# Identical to Get-LocalInventory.ps1:269-328 and Get-SoftwareInventory.ps1:429-488.
+# ---------------------------------------------------------------
+function Save-HistorySnapshot {
+    param(
+        [string]$Computer,
+        [PSObject[]]$Software,
+        [PSObject[]]$Updates,
+        [string]$HistoryRoot,
+        [string]$TargetYear,
+        [string]$TargetMonth
+    )
+
+    if ($TargetYear -and $TargetMonth) {
+        $year = $TargetYear
+        $month = $TargetMonth
+        $timestamp = "$TargetYear$TargetMonth-010000"
+        $snapDate = Get-Date "$TargetYear-$TargetMonth-01 00:00:00"
+    } else {
+        $now = Get-Date
+        $year = $now.ToString('yyyy')
+        $month = $now.ToString('MM')
+        $timestamp = $now.ToString('yyyyMMdd-HHmm')
+        $snapDate = $now
+    }
+
+    $compFolder = ConvertTo-SafeFolderName $Computer
+
+    $snapshotDir = [System.IO.Path]::Combine($HistoryRoot, $compFolder, $year, $month)
+    if (-not (Test-Path $snapshotDir)) {
+        New-Item -Path $snapshotDir -ItemType Directory -Force | Out-Null
+    }
+
+    $snapshotFile = Join-Path $snapshotDir "snapshot-$timestamp.json"
+
+    $snapshot = @{
+        ScriptVersion = $scriptVersion
+        Computer      = $Computer
+        Date          = $snapDate.ToString('yyyy-MM-dd HH:mm:ss')
+        SoftwareCount = $Software.Count
+        UpdateCount   = $Updates.Count
+        Software      = $Software | ForEach-Object {
+            @{
+                Name         = $_.Name
+                Version      = $_.Version
+                Publisher    = $_.Publisher
+                InstallDate  = $_.InstallDate
+                Architecture = $_.Architecture
+            }
+        }
+        Updates = $Updates | ForEach-Object {
+            @{
+                Title       = $_.Title
+                InstallDate = $_.InstallDate
+                Result      = $_.Result
+            }
+        }
+    }
+
+    $snapshot | ConvertTo-Json -Depth 4 | Out-File -FilePath $snapshotFile -Encoding utf8
+    Write-Host "  Snapshot saved: $snapshotFile"
+    $snapshotFile
+}
+
+# ---------------------------------------------------------------
+# New-LocalHtmlReport
+# Generates a per-host HTML report under OutputDir/<host>/<YYYY>/<MM>/report.html
+# Adapted from Get-SoftwareInventory.ps1:587-809 and Get-LocalInventory.ps1:370-590.
+# ---------------------------------------------------------------
+function New-LocalHtmlReport {
+    param(
+        [string]$Computer,
+        [PSObject[]]$Software,
+        [PSObject[]]$Updates,
+        [string]$OutputDir,
+        [string]$Year = '',
+        [string]$Month = ''
+    )
+
+    $reportDate = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    if (-not $Year) { $Year = (Get-Date).ToString('yyyy') }
+    if (-not $Month) { $Month = (Get-Date).ToString('MM') }
+    $year = $Year
+    $month = $Month
+
+    $totalSw = $Software.Count
+    $totalUp = $Updates.Count
+
+    $anchor = "$year-$month"
+
+    $swSb = New-Object System.Text.StringBuilder
+    foreach ($item in $Software) {
+        $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') { $item.InstallDate } else { 'Unknown' }
+        $null = $swSb.Append(@"
+<tr><td>$(ConvertTo-HtmlEncoded $item.Name)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Version)</td>
+    <td>$(ConvertTo-HtmlEncoded $item.Publisher)</td>
+    <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
+"@)
+    }
+    $swRows = $swSb.ToString()
+
+    $upSb = New-Object System.Text.StringBuilder
+    foreach ($item in $Updates) {
+        $date = if ($item.InstallDate -and $item.InstallDate -ne 'Unknown') { $item.InstallDate } else { 'Unknown' }
+        $title = $item.Title
+        $null = $upSb.Append(@"
+<tr><td>$(ConvertTo-HtmlEncoded $title)</td>
+    <td>$(ConvertTo-HtmlEncoded $date)</td></tr>
+"@)
+    }
+    $upRows = $upSb.ToString()
+
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Software Inventory - $(ConvertTo-HtmlEncoded $Computer) - $anchor</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+  h1, h2, h3 { color: #1a3a5c; }
+  .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 10px; }
+  .summary-item { background: #e8f0fe; padding: 10px; border-radius: 4px; text-align: center; }
+  .summary-item .number { font-size: 24px; font-weight: bold; color: #1a3a5c; }
+  .summary-item .label { font-size: 13px; color: #666; }
+  .meta { font-size: 13px; color: #888; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 25px; }
+  th { background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; cursor: pointer; }
+  th:hover { background: #2a5a8c; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; word-break: break-word; }
+  tr:hover td { background: #f0f5ff; }
+  .section-title { margin: 25px 0 10px 0; }
+  .badge-new { display: inline-block; background: #2e7d32; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .badge-update { display: inline-block; background: #1565c0; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .search-box { margin-bottom: 10px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 300px; max-width: 100%; box-sizing: border-box; }
+  .search-box:focus { outline: none; border-color: #1a3a5c; box-shadow: 0 0 4px rgba(26,58,92,.3); }
+  a.back-link { color: #1a3a5c; text-decoration: none; }
+  a.back-link:hover { text-decoration: underline; }
+  .theme-toggle { float: right; background: none; border: 1px solid #1a3a5c; color: #1a3a5c; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { background: #1a3a5c; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    html.theme-auto body { background: #1a1a2e; color: #e0e0e0; }
+    html.theme-auto body h1, html.theme-auto body h2, html.theme-auto body h3 { color: #80b0e0; }
+    html.theme-auto body .summary { background: #16213e; }
+    html.theme-auto body .summary-item { background: #0f3460; }
+    html.theme-auto body .summary-item .number { color: #80b0e0; }
+    html.theme-auto body .summary-item .label { color: #a0c0e0; }
+    html.theme-auto body .meta { color: #888; }
+    html.theme-auto body table { background: #16213e; }
+    html.theme-auto body th { background: #0f3460; }
+    html.theme-auto body th:hover { background: #1a4a7a; }
+    html.theme-auto body td { border-bottom: 1px solid #2a3a5e; }
+    html.theme-auto body tr:hover td { background: #1a2a4e; }
+    html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+    html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+  }
+  html.dark body { background: #1a1a2e; color: #e0e0e0; }
+  html.dark body h1, html.dark body h2, html.dark body h3 { color: #80b0e0; }
+  html.dark body .summary { background: #16213e; }
+  html.dark body .summary-item { background: #0f3460; }
+  html.dark body .summary-item .number { color: #80b0e0; }
+  html.dark body .summary-item .label { color: #a0c0e0; }
+  html.dark body .meta { color: #888; }
+  html.dark body table { background: #16213e; }
+  html.dark body th { background: #0f3460; }
+  html.dark body th:hover { background: #1a4a7a; }
+  html.dark body td { border-bottom: 1px solid #2a3a5e; }
+  html.dark body tr:hover td { background: #1a2a4e; }
+  html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+  html.dark body .search-box:focus { border-color: #80b0e0; }
+</style>
+<script>
+function toggleTheme() {
+  var theme = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+  document.documentElement.classList.toggle('dark');
+  document.documentElement.classList.remove('theme-auto');
+  localStorage.setItem('theme', theme);
+  var links = document.querySelectorAll('a');
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute('href');
+    if (!href || href.indexOf('://') >= 0 || href.indexOf('#') >= 0) continue;
+    href = href.replace(/[?&]theme=\w+/g, '');
+    href += (href.indexOf('?') >= 0 ? '&' : '?') + 'theme=' + theme;
+    links[i].setAttribute('href', href);
+  }
+}
+(function() {
+  try {
+    var m = window.location.search.match(/[?&]theme=(\w+)/);
+    if (m && m[1] === 'dark') { document.documentElement.classList.add('dark'); return; }
+    if (m && m[1] === 'light') { document.documentElement.classList.remove('dark', 'theme-auto'); return; }
+    var saved = localStorage.getItem('theme');
+    if (saved === 'dark') { document.documentElement.classList.add('dark'); return; }
+    if (saved === 'light') { document.documentElement.classList.remove('dark', 'theme-auto'); return; }
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('theme-auto');
+  } catch(e) {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('dark');
+  }
+})();
+document.addEventListener('click',function(e){
+  var el=e.target;
+  while(el&&el.tagName!=='A')el=el.parentNode;
+  if(!el)return;
+  var href=el.getAttribute('href');
+  if(!href||href.indexOf('://')>=0||href.indexOf('#')>=0||href.indexOf('?theme=')>=0)return;
+  var theme=document.documentElement.classList.contains('dark')?'dark':'light';
+  el.href=href+(href.indexOf('?')>=0?'&':'?')+'theme='+theme;
+});
+function filterTable(inputId, tableId) {
+  var input = document.getElementById(inputId);
+  var filter = input.value.toLowerCase();
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr');
+  for (var i = 0; i < rows.length; i++) {
+    var text = rows[i].textContent.toLowerCase();
+    rows[i].style.display = text.indexOf(filter) > -1 ? '' : 'none';
+  }
+}
+function sortTable(tableId, col) {
+  var table = document.getElementById(tableId);
+  var tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+  var dir = table.getAttribute('data-sort-dir-' + col) === 'asc' ? 'desc' : 'asc';
+  table.setAttribute('data-sort-dir-' + col, dir);
+  var multiplier = dir === 'asc' ? 1 : -1;
+  rows.sort(function(a, b) {
+    var aText = a.children[col].textContent.trim();
+    var bText = b.children[col].textContent.trim();
+    var aDate = Date.parse(aText);
+    var bDate = Date.parse(bText);
+    if (!isNaN(aDate) && !isNaN(bDate)) return (aDate - bDate) * multiplier;
+    return aText.localeCompare(bText, undefined, { numeric: true }) * multiplier;
+  });
+  rows.forEach(function(row) { tbody.appendChild(row); });
+}
+</script>
+</head>
+<body>
+<button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
+<a class="back-link" href="../../../../index.html">&larr; Back to inventory</a>
+<h1>Software Inventory Report</h1>
+<div class="summary">
+  <div class="summary-grid">
+    <div class="summary-item"><div class="number">$totalSw</div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number">$totalUp</div><div class="label">Windows Patches</div></div>
+  </div>
+  <div class="meta">Computer: <strong>$(ConvertTo-HtmlEncoded $Computer)</strong> &nbsp;|&nbsp; Generated: $reportDate &nbsp;|&nbsp; Snapshot: $anchor</div>
+</div>
+"@
+
+    $html += @"
+<h2 class="section-title">3rd Party Software <span class="badge-new">$totalSw</span></h2>
+<input type="text" id="allSw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('allSw-filter','allSw-table')">
+<table id="allSw-table"><thead><tr><th onclick="sortTable('allSw-table',0)">Name</th><th onclick="sortTable('allSw-table',1)">Version</th><th onclick="sortTable('allSw-table',2)">Publisher</th><th onclick="sortTable('allSw-table',3)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
+"@
+
+    $html += @"
+<h2 class="section-title">Windows Patches <span class="badge-update">$totalUp</span></h2>
+<input type="text" id="allUp-filter" class="search-box" placeholder="Filter updates..." onkeyup="filterTable('allUp-filter','allUp-table')">
+<table id="allUp-table"><thead><tr><th onclick="sortTable('allUp-table',0)">Title</th><th onclick="sortTable('allUp-table',1)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
+</body></html>
+"@
+
+    $compFolder = ConvertTo-SafeFolderName $Computer
+    $outDir = [System.IO.Path]::Combine($OutputDir, $compFolder, $year, $month)
+    if (-not (Test-Path $outDir)) {
+        New-Item -Path $outDir -ItemType Directory -Force | Out-Null
+    }
+    $reportFile = Join-Path $outDir "report.html"
+    $html | Out-File -FilePath $reportFile -Encoding utf8
+    Write-Host "  Report saved: $reportFile"
+    $reportFile
+}
+
+# ---------------------------------------------------------------
+# Backfill-HistoryMonths
+# Creates snapshot files for missing months in the current year
+# by reconstructing software/patch presence from InstallDate.
+# Adapted from Get-SoftwareInventory.ps1:2280-2385.
+# ---------------------------------------------------------------
+function Backfill-HistoryMonths {
+    param(
+        [string]$HistoryRoot,
+        [string]$Year
+    )
+
+    Write-Host "  Backfill: HistoryRoot=$HistoryRoot"
+    $computerDirs = Get-ChildItem -Path $HistoryRoot -Directory -ErrorAction SilentlyContinue
+    if ($computerDirs.Count -eq 0) {
+        Write-Host "  Backfill: no computer directories found in $HistoryRoot"
+        return @()
+    }
+
+    $backfilled = @()
+
+    foreach ($compDir in $computerDirs) {
+        $compFolder = $compDir.Name
+
+        $snapFiles = Get-ChildItem -Path $compDir.FullName -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+        if ($snapFiles.Count -eq 0) {
+            Write-Host "  Backfill: no snapshot files for $compFolder in $($compDir.FullName)"
+            continue
+        }
+
+        $allSoftware = @{}
+        $allPatches = @{}
+        $compName = $compFolder
+
+        foreach ($file in $snapFiles) {
+            try {
+                $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
+                $compName = $snap.Computer
+                foreach ($sw in $snap.Software) {
+                    $key = ($sw.Name -replace '\s+', ' ').Trim().ToLower()
+                    if (-not $allSoftware.ContainsKey($key) -or $sw.Version -ne 'Unknown') {
+                        $allSoftware[$key] = $sw
+                    }
+                }
+                foreach ($up in $snap.Updates) {
+                    $key = ($up.Title -replace '\s+', ' ').Trim().ToLower()
+                    if (-not $allPatches.ContainsKey($key)) {
+                        $allPatches[$key] = $up
+                    } else {
+                        $existing = $allPatches[$key]
+                        $ed = if ($existing.InstallDate -eq 'Unknown') { '0000-00-00' } else { $existing.InstallDate }
+                        $nd = if ($up.InstallDate -eq 'Unknown') { '0000-00-00' } else { $up.InstallDate }
+                        if ($nd -gt $ed) { $allPatches[$key] = $up }
+                    }
+                }
+            } catch {
+                # skip corrupt
+            }
+        }
+
+        if ($allSoftware.Count -eq 0 -and $allPatches.Count -eq 0) {
+            Write-Host "  Backfill: $compFolder collected no data from $($snapFiles.Count) snapshots"
+            continue
+        }
+        Write-Host "  Backfill: $compFolder collected $($allSoftware.Count) sw, $($allPatches.Count) patches from $($snapFiles.Count) snapshots"
+
+        # Discover unique months from InstallDates in the data
+        $foundMonths = @{}
+        foreach ($sw in $allSoftware.Values) {
+            try { $dt = [datetime]$sw.InstallDate; if ($dt.Year -eq [int]$Year) { $foundMonths[$dt.Month.ToString('00')] = $true } } catch { }
+        }
+        foreach ($up in $allPatches.Values) {
+            try { $dt = [datetime]$up.InstallDate; if ($dt.Year -eq [int]$Year) { $foundMonths[$dt.Month.ToString('00')] = $true } } catch { }
+        }
+
+        Write-Host "  Backfill: $compFolder discovered months: $(($foundMonths.Keys | Sort-Object) -join ', ')"
+
+        foreach ($monthStr in ($foundMonths.Keys | Sort-Object)) {
+            $monthDir = [System.IO.Path]::Combine($HistoryRoot, $compFolder, $Year, $monthStr)
+
+            $existing = Get-ChildItem -Path $monthDir -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+            if ($existing.Count -gt 0) {
+                Write-Host "      $compFolder ${Year}-${monthStr}: existing snapshot, skipping"
+                continue
+            }
+
+            $monthSw = @($allSoftware.Values | Where-Object {
+                try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$monthStr }
+                catch { $false }
+            })
+
+            $monthPatches = @($allPatches.Values | Where-Object {
+                try { $dt = [datetime]$_.InstallDate; $dt.Year -eq [int]$Year -and $dt.Month -eq [int]$monthStr }
+                catch { $false }
+            })
+
+            Write-Host "      $compFolder ${Year}-${monthStr}: $($monthSw.Count) sw, $($monthPatches.Count) patches"
+            if ($monthSw.Count -eq 0 -and $monthPatches.Count -eq 0) {
+                Write-Host "        -> skipping (empty)"
+                continue
+            }
+
+            Save-HistorySnapshot -Computer $compName -Software $monthSw -Updates $monthPatches `
+                -HistoryRoot $HistoryRoot -TargetYear $Year -TargetMonth $monthStr | Out-Null
+            Write-Host "      $compFolder ${Year}-${monthStr}: snapshot saved"
+
+            $backfilled += @{ Year = $Year; Month = $monthStr }
+        }
+    }
+
+    $backfilled
+}
+
 # ============================================================
 # MAIN EXECUTION
 # ============================================================
@@ -219,7 +614,58 @@ Write-Host ""
 Write-Host "  Total: $($hostEntries.Count) host(s), $($allSoftwareNames.Count) unique software titles, $($allUpdateTitles.Count) unique update titles"
 
 # ---------------------------------------------------------------
-# Step 3b — Discover year/month combinations from host folders
+# Step 3a — Backfill missing months in current year
+# ---------------------------------------------------------------
+$now = Get-Date
+$currentYear = $now.ToString('yyyy')
+Write-Host ""
+Write-Host "Backfilling missing history months for $currentYear..."
+$backfilled = Backfill-HistoryMonths -HistoryRoot $dataPath -Year $currentYear
+if ($backfilled.Count -gt 0) {
+    $backfilledMonths = $backfilled | ForEach-Object { "$($_.Year)-$($_.Month)" } | Sort-Object -Unique
+    Write-Host "  Backfilled $($backfilled.Count) snapshot(s): $($backfilledMonths -join ', ')"
+} else {
+    Write-Host "  No months needed backfilling."
+}
+
+# ---------------------------------------------------------------
+# Step 3b — Backfill per-computer reports for all snapshots
+# ---------------------------------------------------------------
+Write-Host ""
+Write-Host "Backfilling per-computer reports..."
+$histComputers = Get-ChildItem -Path $dataPath -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notmatch '^\.' }
+$reportCount = 0
+foreach ($compDir in $histComputers) {
+    $compFolder = $compDir.Name
+    $yearDirs = Get-ChildItem -Path $compDir.FullName -Directory -ErrorAction SilentlyContinue | Sort-Object Name
+    foreach ($yd in $yearDirs) {
+        $year = $yd.Name
+        $monthDirs = Get-ChildItem -Path $yd.FullName -Directory -ErrorAction SilentlyContinue | Sort-Object Name
+        foreach ($md in $monthDirs) {
+            $month = $md.Name
+            $reportFile = [System.IO.Path]::Combine($md.FullName, "report.html")
+            if (Test-Path $reportFile) { continue }
+            $snapFiles = Get-ChildItem -Path $md.FullName -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending
+            if ($snapFiles.Count -eq 0) { continue }
+            try {
+                $snap = Get-Content -Path $snapFiles[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            } catch {
+                Write-Warning "  Could not parse $($snapFiles[0].FullName): $_"
+                continue
+            }
+            Write-Host "  Generating report: $compFolder / $year-$month"
+            New-LocalHtmlReport -Computer $snap.Computer -Software $snap.Software -Updates $snap.Updates `
+                -OutputDir $dataPath -Year $year -Month $month | Out-Null
+            $reportCount++
+        }
+    }
+}
+Write-Host "  Generated $reportCount historical report(s)."
+
+# ---------------------------------------------------------------
+# Step 3c — Discover year/month combinations from host folders
 # ---------------------------------------------------------------
 Write-Host "Discovering year/month combinations..."
 $years = @{}
