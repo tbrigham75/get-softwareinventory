@@ -548,9 +548,13 @@ function Backfill-HistoryMonths {
 
 # ---------------------------------------------------------------
 # New-AllSoftwareIndexHtml
-# Generates all-software.html at the share root with deduplicated
-# software and patches across all hosts, with computer lists.
+# Scans ALL snapshots, populates unique-count HashSets, and
+# generates all-software.html with deduplicated software and
+# patches across all hosts, with computer lists.
 # Adapted from Get-RemoteInventory.ps1 New-AllSoftwareHtml.
+#
+# Sets script-scope $allSoftwareNames and $allUpdateTitles HashSets
+# so callers can use the unique counts without a second scan.
 # ---------------------------------------------------------------
 function New-AllSoftwareIndexHtml {
     param(
@@ -558,10 +562,16 @@ function New-AllSoftwareIndexHtml {
         [string]$SharePath
     )
 
-    # Scan ALL snapshot files across all hosts and months
+    # Scan ALL snapshot files across all hosts and months (single pass)
     $snapshotFiles = Get-ChildItem -Path $DataPath -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
-    if ($snapshotFiles.Count -eq 0) { return }
+    if ($snapshotFiles.Count -eq 0) {
+        $script:allSoftwareNames = [System.Collections.Generic.HashSet[string]]::new()
+        $script:allUpdateTitles  = [System.Collections.Generic.HashSet[string]]::new()
+        return
+    }
 
+    $script:allSoftwareNames = [System.Collections.Generic.HashSet[string]]::new()
+    $script:allUpdateTitles  = [System.Collections.Generic.HashSet[string]]::new()
     [System.Collections.ArrayList]$allSoftware = @()
     [System.Collections.ArrayList]$allPatches = @()
     $hostReportPaths = @{}
@@ -572,6 +582,16 @@ function New-AllSoftwareIndexHtml {
             $hostName = $snap.Computer
             if (-not $hostName) { continue }
 
+            # Populate unique-count HashSets (used by index page summary)
+            foreach ($sw in $snap.Software) {
+                $norm = Normalize-SoftwareName $sw.Name
+                if ($norm) { [void]$script:allSoftwareNames.Add($norm) }
+            }
+            foreach ($up in $snap.Updates) {
+                $norm = Normalize-SoftwareName $up.Title
+                if ($norm) { [void]$script:allUpdateTitles.Add($norm) }
+            }
+
             # Track latest report path per host
             if (-not $hostReportPaths.ContainsKey($hostName)) {
                 $compFolder = ConvertTo-SafeFolderName $hostName
@@ -580,7 +600,7 @@ function New-AllSoftwareIndexHtml {
                     $reportFiles = Get-ChildItem -Path $compDir -Recurse -Filter 'report.html' -ErrorAction SilentlyContinue |
                         Sort-Object LastWriteTime -Descending
                     if ($reportFiles.Count -gt 0) {
-                        $hostReportPaths[$hostName] = $reportFiles[0].FullName.Substring($SharePath.Length + 1)
+                        $hostReportPaths[$hostName] = ($reportFiles[0].FullName.Substring($SharePath.Length + 1)) -replace '\\', '/'
                     }
                 }
             }
@@ -592,6 +612,7 @@ function New-AllSoftwareIndexHtml {
                     Publisher   = $sw.Publisher
                     InstallDate = if ($sw.InstallDate) { $sw.InstallDate } else { 'Unknown' }
                     Computer    = $hostName
+                    SnapDate    = $snap.Date
                 })
             }
             foreach ($up in $snap.Updates) {
@@ -599,6 +620,7 @@ function New-AllSoftwareIndexHtml {
                     Title       = $up.Title
                     InstallDate = if ($up.InstallDate) { $up.InstallDate } else { 'Unknown' }
                     Computer    = $hostName
+                    SnapDate    = $snap.Date
                 })
             }
         } catch {
@@ -609,7 +631,8 @@ function New-AllSoftwareIndexHtml {
     # --- Software dedup ---
     $swEntries = @()
     if ($allSoftware.Count -gt 0) {
-        $grouped = $allSoftware | Group-Object -Property { Normalize-SoftwareName $_.Name }
+        $grouped = $allSoftware | Where-Object { Normalize-SoftwareName $_.Name } |
+            Group-Object -Property { Normalize-SoftwareName $_.Name }
         foreach ($g in $grouped) {
             $items = $g.Group
             $compNames = $items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object
@@ -623,7 +646,7 @@ function New-AllSoftwareIndexHtml {
                 }
             }
             $computers = ($compNames | ForEach-Object { $compLinks[$_] }) -join ', '
-            $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.Name } -Descending |
+            $latest = $items | Sort-Object { $_.Version -eq 'Unknown' }, { $_.SnapDate } -Descending |
                 Select-Object -First 1
             $latestInstallDate = $items | Sort-Object { if ($_.InstallDate -eq 'Unknown') { '0000-00-00' } else { $_.InstallDate } } -Descending | Select-Object -First 1
             $swEntries += [PSCustomObject]@{
@@ -655,7 +678,8 @@ function New-AllSoftwareIndexHtml {
     # --- Patch dedup ---
     $patchEntries = @()
     if ($allPatches.Count -gt 0) {
-        $grouped = $allPatches | Group-Object -Property { Normalize-SoftwareName $_.Title }
+        $grouped = $allPatches | Where-Object { Normalize-SoftwareName $_.Title } |
+            Group-Object -Property { Normalize-SoftwareName $_.Title }
         foreach ($g in $grouped) {
             $items = $g.Group
             $compNames = $items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object
@@ -705,6 +729,7 @@ function New-AllSoftwareIndexHtml {
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
   h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
+  h2 { color: #1a3a5c; }
   .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 10px; margin-bottom: 15px; }
   .summary-item { background: #e8f0fe; padding: 10px; border-radius: 4px; text-align: center; }
@@ -727,7 +752,7 @@ function New-AllSoftwareIndexHtml {
   .theme-toggle:hover { background: #1a3a5c; color: #fff; }
   @media (prefers-color-scheme: dark) {
     html.theme-auto body { background: #1a1a2e; color: #e0e0e0; }
-    html.theme-auto body h1 { color: #80b0e0; }
+    html.theme-auto body h1, html.theme-auto body h2 { color: #80b0e0; }
     html.theme-auto body .summary { background: #16213e; }
     html.theme-auto body .summary-item { background: #0f3460; }
     html.theme-auto body .summary-item .number { color: #80b0e0; }
@@ -740,7 +765,7 @@ function New-AllSoftwareIndexHtml {
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
-  html.dark body h1 { color: #80b0e0; }
+  html.dark body h1, html.dark body h2 { color: #80b0e0; }
   html.dark body .summary { background: #16213e; }
   html.dark body .summary-item { background: #0f3460; }
   html.dark body .summary-item .number { color: #80b0e0; }
@@ -946,30 +971,12 @@ foreach ($folder in $hostFolders) {
 }
 
 # ---------------------------------------------------------------
-# Step 3a — Scan ALL snapshots for unique software/update counts
+# Step 3a — Scan ALL snapshots + generate all-software.html
+# (single pass: populates unique-count HashSets and generates page)
 # ---------------------------------------------------------------
 Write-Host ""
-Write-Host "Scanning all snapshots for unique counts..."
-$allSoftwareNames = [System.Collections.Generic.HashSet[string]]::new()
-$allUpdateTitles  = [System.Collections.Generic.HashSet[string]]::new()
-
-$snapshotFiles = Get-ChildItem -Path $dataPath -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
-foreach ($file in $snapshotFiles) {
-    try {
-        $snap = Get-Content -Path $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($sw in $snap.Software) {
-            $norm = Normalize-SoftwareName $sw.Name
-            if ($norm) { [void]$allSoftwareNames.Add($norm) }
-        }
-        foreach ($up in $snap.Updates) {
-            $norm = Normalize-SoftwareName $up.Title
-            if ($norm) { [void]$allUpdateTitles.Add($norm) }
-        }
-    } catch {
-        # skip corrupt snapshots
-    }
-}
-
+Write-Host "Scanning all snapshots and generating all-software page..."
+New-AllSoftwareIndexHtml -DataPath $dataPath -SharePath $SharePath
 Write-Host ""
 Write-Host "  Total: $($hostEntries.Count) host(s), $($allSoftwareNames.Count) unique software titles, $($allUpdateTitles.Count) unique update titles"
 
@@ -989,14 +996,7 @@ if ($backfilled.Count -gt 0) {
 }
 
 # ---------------------------------------------------------------
-# Step 3c — Generate all-software.html
-# ---------------------------------------------------------------
-Write-Host ""
-Write-Host "Generating all-software page..."
-New-AllSoftwareIndexHtml -DataPath $dataPath -SharePath $SharePath
-
-# ---------------------------------------------------------------
-# Step 3d — Backfill per-computer reports for all snapshots
+# Step 3c — Backfill per-computer reports for all snapshots
 # ---------------------------------------------------------------
 Write-Host ""
 Write-Host "Backfilling per-computer reports..."
@@ -1032,7 +1032,7 @@ foreach ($compDir in $histComputers) {
 Write-Host "  Generated $reportCount historical report(s)."
 
 # ---------------------------------------------------------------
-# Step 3e — Discover year/month combinations from host folders
+# Step 3d — Discover year/month combinations from host folders
 # ---------------------------------------------------------------
 Write-Host "Discovering year/month combinations..."
 $years = @{}

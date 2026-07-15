@@ -77,6 +77,22 @@ function ConvertTo-SafeFolderName {
     $folder -replace '[/\\:*?"<>|]', '_'
 }
 
+# ---------------------------------------------------------------
+# Normalize a software/update name for deduplication
+# Strips version numbers, architecture suffixes, and parenthetical
+# qualifiers so that e.g. "7-Zip 23.01 (x64)" and "7-Zip 23.01"
+# both normalize to "7-zip".
+# ---------------------------------------------------------------
+function Normalize-SoftwareName {
+    param([string]$Name)
+    if (-not $Name) { return '' }
+    $n = $Name
+    $n = $n -replace '\s*\([^)]*\)\s*', ' '
+    $n = $n -replace '\s+(x86|x64|32-bit|64-bit|arm64)\s*$', ''
+    $n = $n -replace '\s+[vV]?\d+(\.\d+){1,5}\s*$', ''
+    ($n -replace '\s+', ' ').Trim().ToLower()
+}
+
 
 # Default paths (outside git repo — no system info leaked)
 $webRoot = "C:\Utils\Web\get-softwareinventory"
@@ -211,7 +227,7 @@ function Merge-SoftwareDuplicates {
     param([PSObject[]]$Items)
     if (-not $Items -or $Items.Count -eq 0) { return @() }
 
-    $Items | Group-Object -Property { ($_.Name -replace '\s+', ' ').Trim().ToLower() } | ForEach-Object {
+    $Items | Group-Object -Property { Normalize-SoftwareName $_.Name } | ForEach-Object {
         $group = $_.Group
         if ($group.Count -eq 1) { $group }
         else {
@@ -227,7 +243,7 @@ function Merge-UpdateDuplicates {
     param([PSObject[]]$Items)
     if (-not $Items -or $Items.Count -eq 0) { return @() }
 
-    $Items | Group-Object -Property { ($_.Title -replace '\s+', ' ').Trim().ToLower() } | ForEach-Object {
+    $Items | Group-Object -Property { Normalize-SoftwareName $_.Title } | ForEach-Object {
         $group = $_.Group
         if ($group.Count -eq 1) { $group }
         else {
@@ -1167,7 +1183,7 @@ function New-AllSoftwareHtml {
     # --- Software dedup ---
     $swEntries = @()
     if ($allSoftware.Count -gt 0) {
-        $grouped = $allSoftware | Group-Object -Property { ($_.Name -replace '\s+', ' ').Trim().ToLower() }
+        $grouped = $allSoftware | Group-Object -Property { Normalize-SoftwareName $_.Name }
         foreach ($g in $grouped) {
             $items = $g.Group
             $compNames = $items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object
@@ -1215,7 +1231,7 @@ function New-AllSoftwareHtml {
     # --- Patch dedup ---
     $patchEntries = @()
     if ($allPatches.Count -gt 0) {
-        $grouped = $allPatches | Group-Object -Property { ($_.Title -replace '\s+', ' ').Trim().ToLower() }
+        $grouped = $allPatches | Group-Object -Property { Normalize-SoftwareName $_.Title }
         foreach ($g in $grouped) {
             $items = $g.Group
             $compNames = $items | ForEach-Object { $_.Computer } | Select-Object -Unique | Sort-Object

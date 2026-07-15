@@ -6,7 +6,7 @@ This repository contains three scripts that serve different environments:
 
 | Script | Environment | Remote Access |
 |--------|------------|---------------|
-| `Get-SoftwareInventory.ps1` | WinRM-enabled networks | Uses WinRM/remote registry for remote collection |
+| `Get-RemoteInventory.ps1` | WinRM-enabled networks | Uses WinRM/remote registry for remote collection |
 | `Get-LocalInventory.ps1` | Locked-down networks | No remote access — runs locally via Scheduled Task |
 | `Get-InventoryIndex.ps1` | Central reporting | No remote access — reads files from a network share |
 
@@ -19,20 +19,20 @@ Per script:
 
 | Script | Requirements |
 |--------|-------------|
-| `Get-SoftwareInventory.ps1` | Local: Administrator. Remote: Admin rights, WinRM enabled, firewall access for Remote Registry (RPC) and WMI/DCOM |
+| `Get-RemoteInventory.ps1` | Local: Administrator. Remote: Admin rights, WinRM enabled, firewall access for Remote Registry (RPC) and WMI/DCOM |
 | `Get-LocalInventory.ps1` | Local admin rights on each machine; write access to the inventory share |
 | `Get-InventoryIndex.ps1` | Read access to the inventory share; write access to generate `index.html` |
 
 ---
 
-## Get-SoftwareInventory.ps1 — WinRM-Based Collection
+## Get-RemoteInventory.ps1 — WinRM-Based Collection
 
 The original script for WinRM-enabled environments. Collects inventory from one or more machines (local + remote), saves JSON snapshots, and generates a full HTML report website.
 
 ### Usage
 
 ```
-.\Get-SoftwareInventory.ps1 [-ComputerName "host1","host2"] [-OutputPath <path>] [-HistoryPath <path>] [-PassThru] [-ExportCsv] [-ThrottleLimit <n>]
+.\Get-RemoteInventory.ps1 [-ComputerName "host1","host2"] [-OutputPath <path>] [-HistoryPath <path>] [-PassThru] [-ExportCsv] [-ThrottleLimit <n>]
 ```
 
 | Parameter | Description |
@@ -71,8 +71,9 @@ History\<Computer>\YYYY\MM\snapshot-*.json    Full snapshot history (one per run
 ## Features
 
 ### Deduplication
+- **`Merge-SoftwareDuplicates`** — Software entries are deduplicated by normalized Name (version-agnostic grouping via `Normalize-SoftwareName`), keeping the entry with the richest data (known version preferred, 64-bit over 32-bit). Applied at collection time.
 - **`Merge-UpdateDuplicates`** — Windows Update entries are deduplicated by normalized Title, keeping the latest InstallDate per group. Applied at collection time for both local and remote hosts.
-- Software is deduplicated by normalized Name (version-agnostic grouping) in the All Software & Patches view.
+- **`Normalize-SoftwareName`** — Shared normalization function that strips version numbers, architecture suffixes (x86/x64), and parenthetical qualifiers before lowercasing, so "7-Zip 23.01 (x64)" and "7-Zip 23.01" are treated as the same software.
 
 ### Month-Filtered Views
 - The combined month report (`Output/YYYY/MM/index.html`) shows only software and patches whose InstallDate falls within that specific year/month — each month shows "activity" (items installed during that month).
@@ -82,6 +83,7 @@ History\<Computer>\YYYY\MM\snapshot-*.json    Full snapshot history (one per run
 - A global page (`Output/all-software.html`) that scans all historical snapshots across every computer/month.
 - Two searchable/sortable tables: **3rd Party Software** (deduped by name, keeps latest Version) and **Windows Patches** (deduped by Title, keeps latest InstallDate).
 - Summary grid with deduplicated unique counts.
+- Computer list per entry showing which hosts have each software/patch installed.
 
 ### Historical Backfill
 - **`Backfill-HistoryMonths`** discovers unique (Year, Month) pairs from actual InstallDate values in snapshot data and reconstructs missing monthly snapshots.
@@ -114,7 +116,7 @@ History\<Computer>\YYYY\MM\snapshot-*.json    Full snapshot history (one per run
 - **`[datetime]` cast for date handling** — robust against `ConvertFrom-Json` behavior differences between PS 5.1 (strings) and PS 7+ (DateTime objects)
 - **Data-driven month discovery** — `Backfill-HistoryMonths` discovers months from actual snapshot InstallDates rather than iterating month numbers, naturally handling non-contiguous dates
 
-## Limitations (Get-SoftwareInventory.ps1)
+## Limitations (Get-RemoteInventory.ps1)
 
 - 32-bit software on 64-bit OS (Wow6432Node) is enumerated; however, per-user (HKCU) software is only collected locally, not via remote registry fallback
 - Remote registry requires the "Remote Registry" service to be running on targets
@@ -129,7 +131,7 @@ For environments where WinRM, remote registry, and other remote management tools
 ### How It Works
 
 1. Validates the share is accessible and writable (temp file test)
-2. Collects installed software from registry (same logic as `Get-SoftwareInventory.ps1`)
+2. Collects installed software from registry (same logic as `Get-RemoteInventory.ps1`)
 3. Collects Windows updates via WUA COM API with hotfix fallback
 4. Saves a timestamped JSON snapshot to the share
 5. Generates an HTML report for the host on the share
@@ -154,6 +156,7 @@ Each machine writes into a folder named after its hostname, with year/month subf
 ```
 \\fileserver\inventory\
 ├── index.html                          Generated by Get-InventoryIndex.ps1
+├── all-software.html                   Generated by Get-InventoryIndex.ps1
 ├── _logs\                              Script error logs (if share is unavailable)
 │   └── <hostname>-errors.log
 ├── HOSTNAME1\
@@ -191,13 +194,15 @@ The script uses the UNC path directly — no drive mapping is needed or performe
 
 ## Get-InventoryIndex.ps1 — Central Index Generator
 
-Scans the inventory share, reads each host's latest snapshot, and generates a central `index.html` at the share root with links to every host's report.
+Scans the inventory share, reads all snapshots, and generates a central `index.html` at the share root with links to every host's report plus a deduplicated all-software page.
 
 ### How It Works
 
 1. Scans the share root for hostname folders (skips `_logs`)
-2. Reads the latest JSON snapshot from each host folder
-3. Generates `index.html` with summary stats and a sortable, filterable table
+2. Reads the latest JSON snapshot from each host folder for the host table
+3. Scans ALL snapshots across all hosts/months for unique software/update counts (single pass)
+4. Generates `all-software.html` with deduplicated software and patches
+5. Generates `index.html` with clickable summary stats and a sortable, filterable host table
 
 ### Usage
 
@@ -212,10 +217,16 @@ Scans the inventory share, reads each host's latest snapshot, and generates a ce
 
 ### What the Index Shows
 
-- Summary bar: total hosts, total software entries, total update entries, last scan date
-- Sortable/filterable table with columns: Hostname (link to report), Software count, Updates count, Last scan date
+- **Clickable summary bar**: total hosts (links to host table), unique software titles (links to all-software page), unique update titles (links to all-software page), last scan date
+- **Sortable/filterable host table** with columns: Hostname (link to report), Software count, Updates count, Last scan date
+- **Year/month navigation** with PC counts per month
+- Generates **`all-software.html`** — deduplicated global view with computer lists
 - Dark/light theme toggle, client-side search/filter
 - Same visual style as the per-host reports (Segoe UI, `#1a3a5c` theme)
+
+### Unique Count Methodology
+
+The index scans all historical snapshot files (not just the latest per host) to build accurate unique counts. Software names are normalized via `Normalize-SoftwareName` which strips version numbers, architecture suffixes, and parenthetical qualifiers before grouping, so entries like "7-Zip 23.01" and "7-Zip 24.00 (x64)" are counted as a single unique software title.
 
 ### Scheduling
 
@@ -234,9 +245,9 @@ Register-ScheduledTask -TaskName "InventoryIndex" -Action $action -Trigger $trig
 
 | File | Purpose |
 |------|---------|
-| `Get-SoftwareInventory.ps1` | WinRM-based collection script (~2628 lines, ~25 functions) |
-| `Get-LocalInventory.ps1` | Local collection to network share (694 lines, 12 functions) |
-| `Get-InventoryIndex.ps1` | Central index generator for share (405 lines, 8 functions) |
-| `hostnames.txt` | Default list of computers to inventory (used by `Get-SoftwareInventory.ps1`) |
-| `History\` | Archived JSON snapshots (auto-created by `Get-SoftwareInventory.ps1`) |
-| `Output\` | Generated HTML reports (auto-created by `Get-SoftwareInventory.ps1`) |
+| `Get-RemoteInventory.ps1` | WinRM-based collection script (~2644 lines, ~26 functions) |
+| `Get-LocalInventory.ps1` | Local collection to network share (~708 lines, 13 functions) |
+| `Get-InventoryIndex.ps1` | Central index generator for share (~1577 lines, 9 functions) |
+| `hostnames.txt` | Default list of computers to inventory (used by `Get-RemoteInventory.ps1`) |
+| `History\` | Archived JSON snapshots (auto-created by `Get-RemoteInventory.ps1`) |
+| `Output\` | Generated HTML reports (auto-created by `Get-RemoteInventory.ps1`) |

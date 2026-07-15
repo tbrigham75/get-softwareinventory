@@ -103,6 +103,19 @@ function ConvertTo-SafeFolderName {
     $folder -replace '[/\\:*?"<>|]', '_'
 }
 
+# ---------------------------------------------------------------
+# Normalize a software/update name for deduplication
+# ---------------------------------------------------------------
+function Normalize-SoftwareName {
+    param([string]$Name)
+    if (-not $Name) { return '' }
+    $n = $Name
+    $n = $n -replace '\s*\([^)]*\)\s*', ' '
+    $n = $n -replace '\s+(x86|x64|32-bit|64-bit|arm64)\s*$', ''
+    $n = $n -replace '\s+[vV]?\d+(\.\d+){1,5}\s*$', ''
+    ($n -replace '\s+', ' ').Trim().ToLower()
+}
+
 # ============================================================
 # DATA COLLECTION FUNCTIONS — copied verbatim from Get-SoftwareInventory.ps1
 # ============================================================
@@ -154,7 +167,7 @@ function Merge-SoftwareDuplicates {
     param([PSObject[]]$Items)
     if (-not $Items -or $Items.Count -eq 0) { return @() }
 
-    $Items | Group-Object -Property { ($_.Name -replace '\s+', ' ').Trim().ToLower() } | ForEach-Object {
+    $Items | Group-Object -Property { Normalize-SoftwareName $_.Name } | ForEach-Object {
         $group = $_.Group
         if ($group.Count -eq 1) { $group }
         else {
@@ -174,7 +187,7 @@ function Merge-UpdateDuplicates {
     param([PSObject[]]$Items)
     if (-not $Items -or $Items.Count -eq 0) { return @() }
 
-    $Items | Group-Object -Property { ($_.Title -replace '\s+', ' ').Trim().ToLower() } | ForEach-Object {
+    $Items | Group-Object -Property { Normalize-SoftwareName $_.Title } | ForEach-Object {
         $group = $_.Group
         if ($group.Count -eq 1) { $group }
         else {
