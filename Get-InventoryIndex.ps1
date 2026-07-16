@@ -463,7 +463,7 @@ function Backfill-HistoryMonths {
     foreach ($compDir in $computerDirs) {
         $compFolder = $compDir.Name
 
-        $snapFiles = Get-ChildItem -Path $compDir.FullName -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+        $snapFiles = Get-ChildItem -Path $compDir.FullName -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
         if ($snapFiles.Count -eq 0) {
             Write-Host "  Backfill: no snapshot files for $compFolder in $($compDir.FullName)"
             continue
@@ -478,13 +478,13 @@ function Backfill-HistoryMonths {
                 $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
                 $compName = $snap.Computer
                 foreach ($sw in $snap.Software) {
-                    $key = ($sw.Name -replace '\s+', ' ').Trim().ToLower()
+                    $key = Normalize-SoftwareName $sw.Name
                     if (-not $allSoftware.ContainsKey($key) -or $sw.Version -ne 'Unknown') {
                         $allSoftware[$key] = $sw
                     }
                 }
                 foreach ($up in $snap.Updates) {
-                    $key = ($up.Title -replace '\s+', ' ').Trim().ToLower()
+                    $key = Normalize-SoftwareName $up.Title
                     if (-not $allPatches.ContainsKey($key)) {
                         $allPatches[$key] = $up
                     } else {
