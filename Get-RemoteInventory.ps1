@@ -947,6 +947,15 @@ function New-MonthReportHtml {
     })
     $totalUp = $allUpdates.Count
 
+    # Cross-list dedup: remove updates already in software
+    if ($allSoftware.Count -gt 0 -and $allUpdates.Count -gt 0) {
+        $swNames = @($allSoftware | ForEach-Object { Normalize-SoftwareName $_.Name } | Where-Object { $_ })
+        if ($swNames.Count -gt 0) {
+            $allUpdates = @($allUpdates | Where-Object { (Normalize-SoftwareName $_.Title) -notin $swNames })
+        }
+    }
+    $totalUp = $allUpdates.Count
+
     # Build software rows with hostname column
     $swSb = New-Object System.Text.StringBuilder
     foreach ($item in $allSoftware | Sort-Object Hostname, Name) {
@@ -1189,6 +1198,14 @@ function New-AllSoftwareHtml {
             }
         } catch {
             # skip corrupt snapshots
+        }
+    }
+
+    # --- Cross-list dedup: remove updates already in software ---
+    if ($allSoftware.Count -gt 0 -and $allPatches.Count -gt 0) {
+        $swNames = @($allSoftware | ForEach-Object { Normalize-SoftwareName $_.Name } | Where-Object { $_ })
+        if ($swNames.Count -gt 0) {
+            $allPatches = @($allPatches | Where-Object { (Normalize-SoftwareName $_.Title) -notin $swNames })
         }
     }
 
@@ -2643,11 +2660,19 @@ foreach ($compDir in $histComputers) {
                 Write-Warning "  Could not parse $($snapFiles[0].FullName): $_"
                 continue
             }
+            # Cross-list dedup: remove updates already in software
+            $snapSw = @($snap.Software)
+            if ($snapSw.Count -gt 0 -and $snap.Updates.Count -gt 0) {
+                $swNames = @($snapSw | ForEach-Object { Normalize-SoftwareName $_.Name } | Where-Object { $_ })
+                if ($swNames.Count -gt 0) {
+                    $snapUp = @($snap.Updates | Where-Object { (Normalize-SoftwareName $_.Title) -notin $swNames })
+                } else { $snapUp = @($snap.Updates) }
+            } else { $snapUp = @($snap.Updates) }
             Write-Host "  Generating historical report: $compFolder / $year-$month"
-            New-InventoryHtmlReport -Computer $snap.Computer -Software $snap.Software -Updates $snap.Updates `
+            New-InventoryHtmlReport -Computer $snap.Computer -Software $snapSw -Updates $snapUp `
                 -PreviousSnapshot $null -OutputDir $OutputPath -Year $year -Month $month
             if ($ExportCsv) {
-                New-CsvExport -Computer $snap.Computer -Software $snap.Software -Updates $snap.Updates `
+                New-CsvExport -Computer $snap.Computer -Software $snapSw -Updates $snapUp `
                     -OutputDir $OutputPath -Year $year -Month $month
             }
         }

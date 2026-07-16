@@ -634,6 +634,14 @@ function New-AllSoftwareIndexHtml {
         }
     }
 
+    # --- Cross-list dedup: remove updates already in software ---
+    if ($allSoftware.Count -gt 0 -and $allPatches.Count -gt 0) {
+        $swNames = @($allSoftware | ForEach-Object { Normalize-SoftwareName $_.Name } | Where-Object { $_ })
+        if ($swNames.Count -gt 0) {
+            $allPatches = @($allPatches | Where-Object { (Normalize-SoftwareName $_.Title) -notin $swNames })
+        }
+    }
+
     # --- Software dedup ---
     $swEntries = @()
     if ($allSoftware.Count -gt 0) {
@@ -1036,8 +1044,16 @@ foreach ($compDir in $histComputers) {
                 Write-Warning "  Could not parse $($snapFiles[0].FullName): $_"
                 continue
             }
+            # Cross-list dedup: remove updates already in software
+            $snapSw = @($snap.Software)
+            if ($snapSw.Count -gt 0 -and $snap.Updates.Count -gt 0) {
+                $swNames = @($snapSw | ForEach-Object { Normalize-SoftwareName $_.Name } | Where-Object { $_ })
+                if ($swNames.Count -gt 0) {
+                    $snapUp = @($snap.Updates | Where-Object { (Normalize-SoftwareName $_.Title) -notin $swNames })
+                } else { $snapUp = @($snap.Updates) }
+            } else { $snapUp = @($snap.Updates) }
             Write-Host "  Generating report: $compFolder / $year-$month"
-            New-LocalHtmlReport -Computer $snap.Computer -Software $snap.Software -Updates $snap.Updates `
+            New-LocalHtmlReport -Computer $snap.Computer -Software $snapSw -Updates $snapUp `
                 -OutputDir $dataPath -Year $year -Month $month | Out-Null
             $reportCount++
         }
@@ -1143,6 +1159,14 @@ foreach ($y in $sortedYears) {
                 }
             } catch {
                 Write-Warning "    Could not load snapshot for $hostName : $_"
+            }
+        }
+
+        # Cross-list dedup: remove updates already in software
+        if ($allSw.Count -gt 0 -and $allUp.Count -gt 0) {
+            $swNames = @($allSw | ForEach-Object { Normalize-SoftwareName $_.Name } | Where-Object { $_ })
+            if ($swNames.Count -gt 0) {
+                $allUp = @($allUp | Where-Object { (Normalize-SoftwareName $_.Title) -notin $swNames })
             }
         }
 
