@@ -311,6 +311,9 @@ function New-LocalHtmlReport {
     html.theme-auto body tr:hover td { background: #1a2a4e; }
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2, html.dark body h3 { color: #80b0e0; }
@@ -326,6 +329,9 @@ function New-LocalHtmlReport {
   html.dark body tr:hover td { background: #1a2a4e; }
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
@@ -756,6 +762,7 @@ function New-AllSoftwareIndexHtml {
     html.theme-auto body .summary { background: #16213e; }
     html.theme-auto body .summary-item { background: #0f3460; }
     html.theme-auto body .summary-item .number { color: #80b0e0; }
+    html.theme-auto body .summary-item .label { color: #a0c0e0; }
     html.theme-auto body table { background: #16213e; }
     html.theme-auto body th { background: #0f3460; }
     html.theme-auto body td { border-bottom: 1px solid #2a3a5e; }
@@ -763,12 +770,16 @@ function New-AllSoftwareIndexHtml {
     html.theme-auto body .meta { color: #888; }
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2 { color: #80b0e0; }
   html.dark body .summary { background: #16213e; }
   html.dark body .summary-item { background: #0f3460; }
   html.dark body .summary-item .number { color: #80b0e0; }
+  html.dark body .summary-item .label { color: #a0c0e0; }
   html.dark body table { background: #16213e; }
   html.dark body th { background: #0f3460; }
   html.dark body td { border-bottom: 1px solid #2a3a5e; }
@@ -776,6 +787,9 @@ function New-AllSoftwareIndexHtml {
   html.dark body .meta { color: #888; }
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
@@ -1207,6 +1221,9 @@ foreach ($y in $sortedYears) {
     html.theme-auto body tr:hover td { background: #1a2a4e; }
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2, html.dark body h3 { color: #80b0e0; }
@@ -1222,6 +1239,9 @@ foreach ($y in $sortedYears) {
   html.dark body tr:hover td { background: #1a2a4e; }
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
@@ -1431,6 +1451,9 @@ $html = @"
     html.theme-auto body .jump-to-year { background: #16213e; }
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2 { color: #80b0e0; }
@@ -1450,6 +1473,9 @@ $html = @"
   html.dark body .jump-to-year { background: #16213e; }
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {

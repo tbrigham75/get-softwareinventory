@@ -699,6 +699,9 @@ function New-InventoryHtmlReport {
     html.theme-auto body tr:hover td { background: #1a2a4e; }
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2, html.dark body h3 { color: #80b0e0; }
@@ -714,6 +717,9 @@ function New-InventoryHtmlReport {
   html.dark body tr:hover td { background: #1a2a4e; }
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
@@ -786,7 +792,7 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="../../../../index.html">&larr; Back to archive</a>
+<a class="back-link" href="../../../../index.html">&larr; Back to inventory</a>
 <h1>Software Inventory Report</h1>
 <div class="summary">
   <div class="summary-grid">
@@ -1019,6 +1025,9 @@ function New-MonthReportHtml {
     html.theme-auto body tr:hover td { background: #1a2a4e; }
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2, html.dark body h3 { color: #80b0e0; }
@@ -1034,6 +1043,9 @@ function New-MonthReportHtml {
   html.dark body tr:hover td { background: #1a2a4e; }
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
@@ -1106,13 +1118,13 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="../../../index.html">&larr; Back to archive</a>
+<a class="back-link" href="../../../index.html">&larr; Back to inventory</a>
 <h1>$monthName $Year &mdash; Combined Inventory</h1>
 <div class="summary">
   <div class="summary-grid">
     <div class="summary-item"><div class="number"><a href="../../../computers.html" style="color:inherit;text-decoration:none">$compCount</a></div><div class="label">Computers</div></div>
-    <div class="summary-item"><div class="number"><a href="../../../all-software.html" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
-    <div class="summary-item"><div class="number"><a href="../../../all-software.html" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../all-software.html#software-section" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number"><a href="../../../all-software.html#patches-section" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
   </div>
   <div class="meta">Computers: $compList &nbsp;|&nbsp; Generated: $($now.ToString('yyyy-MM-dd HH:mm:ss'))</div>
 </div>
@@ -1318,6 +1330,9 @@ function New-AllSoftwareHtml {
     html.theme-auto body .meta { color: #888; }
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2 { color: #80b0e0; }
@@ -1332,6 +1347,9 @@ function New-AllSoftwareHtml {
   html.dark body .meta { color: #888; }
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
@@ -1406,7 +1424,7 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="index.html">&larr; Back to archive</a>
+<a class="back-link" href="index.html">&larr; Back to inventory</a>
 <h1>All Software &amp; Patches</h1>
 <div class="summary">
   <div class="summary-grid">
@@ -1567,6 +1585,9 @@ function New-ComputersHtml {
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
     html.theme-auto body a { color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2, html.dark body h3 { color: #80b0e0; }
@@ -1583,6 +1604,9 @@ function New-ComputersHtml {
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
   html.dark body a { color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
@@ -1655,7 +1679,7 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="index.html">&larr; Back to archive</a>
+<a class="back-link" href="index.html">&larr; Back to inventory</a>
 <h1>Computers</h1>
 <div class="summary">
   <div class="summary-grid">
@@ -1890,6 +1914,8 @@ function New-WebsiteIndexHtml {
     html.theme-auto body .meta { color: #888; }
     html.theme-auto body .failures-link.green { background: #1b5e20; color: #a5d6a7; }
     html.theme-auto body .failures-link.red { background: #b71c1c; color: #ffcdd2; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1 { color: #80b0e0; }
@@ -1899,6 +1925,8 @@ function New-WebsiteIndexHtml {
   html.dark body .meta { color: #888; }
   html.dark body .failures-link.green { background: #1b5e20; color: #a5d6a7; }
   html.dark body .failures-link.red { background: #b71c1c; color: #ffcdd2; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   #search-results { display: none; margin: 10px 0; }
   .search-result-item { margin: 8px 0; padding: 8px 12px; background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; }
   html.dark body .search-result-item { background: #0f3460; border-color: #2a3a5e; }
@@ -1997,7 +2025,7 @@ function filterLinks() {
     resultsDiv.style.display = 'block';
     for (var i = 0; i < monthLinks.length; i++) {
       var link = monthLinks[i], show = false;
-      for (var mk in matchedMonths) { if (link.href.indexOf(mk) > -1) { show = true; break; } }
+      for (var mk in matchedMonths) { if (link.getAttribute('href').indexOf(mk.replace('-','/')) > -1) { show = true; break; } }
       link.style.display = show ? '' : 'none';
     }
   } else {
@@ -2138,7 +2166,7 @@ document.addEventListener('click',function(e){
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="index.html">&larr; Back to archive</a>
+<a class="back-link" href="index.html">&larr; Back to inventory</a>
 <h1>Inventory Failures</h1>
 <div class="success">All computers were successfully inventoried.</div>
 <div class="meta">Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</div>
@@ -2190,20 +2218,22 @@ document.addEventListener('click',function(e){
      html.theme-auto body td { border-bottom: 1px solid #2a3a5e; }
      html.theme-auto body tr:hover td { background: #1a2a4e; }
      html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
-     html.theme-auto body .theme-toggle { border-color: #ef9a9a; color: #ef9a9a; }
-     html.theme-auto body .theme-toggle:hover { background: #ef9a9a; color: #1a1a2e; }
-   }
-   html.dark body { background: #1a1a2e; color: #e0e0e0; }
-   html.dark body h1 { color: #e57373; }
-   html.dark body .summary { background: #16213e; }
-   html.dark body table { background: #16213e; }
-   html.dark body th { background: #b71c1c; }
-   html.dark body th:hover { background: #c62828; }
-   html.dark body td { border-bottom: 1px solid #2a3a5e; }
-   html.dark body tr:hover td { background: #1a2a4e; }
-   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
-   html.dark body .theme-toggle { border-color: #ef9a9a; color: #ef9a9a; }
-   html.dark body .theme-toggle:hover { background: #ef9a9a; color: #1a1a2e; }
+      html.theme-auto body .theme-toggle { border-color: #ef9a9a; color: #ef9a9a; }
+      html.theme-auto body .theme-toggle:hover { background: #ef9a9a; color: #1a1a2e; }
+      html.theme-auto body a.back-link { color: #ef9a9a; }
+    }
+    html.dark body { background: #1a1a2e; color: #e0e0e0; }
+    html.dark body h1 { color: #e57373; }
+    html.dark body .summary { background: #16213e; }
+    html.dark body table { background: #16213e; }
+    html.dark body th { background: #b71c1c; }
+    html.dark body th:hover { background: #c62828; }
+    html.dark body td { border-bottom: 1px solid #2a3a5e; }
+    html.dark body tr:hover td { background: #1a2a4e; }
+    html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
+    html.dark body .theme-toggle { border-color: #ef9a9a; color: #ef9a9a; }
+    html.dark body .theme-toggle:hover { background: #ef9a9a; color: #1a1a2e; }
+    html.dark body a.back-link { color: #ef9a9a; }
 </style>
 <script>
 function toggleTheme() {
@@ -2276,7 +2306,7 @@ function sortTable(tableId, col) {
 </head>
 <body>
 <button class="theme-toggle" onclick="toggleTheme()">&#9681; Theme</button>
-<a class="back-link" href="index.html">&larr; Back to archive</a>
+<a class="back-link" href="index.html">&larr; Back to inventory</a>
 <h1>Inventory Failures</h1>
 <div class="summary"><strong>$count computer(s)</strong> could not be inventoried. See details below.</div>
 <input type="text" id="fail-filter" class="search-box" placeholder="Filter failures..." onkeyup="filterTable('fail-filter','fail-table')">
@@ -2314,7 +2344,7 @@ function Backfill-HistoryMonths {
     foreach ($compDir in $computerDirs) {
         $compFolder = $compDir.Name
 
-        $snapFiles = Get-ChildItem -Path $compDir.FullName -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue
+        $snapFiles = Get-ChildItem -Path $compDir.FullName -Recurse -Filter 'snapshot-*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
         if ($snapFiles.Count -eq 0) {
             Write-Host "  Backfill: no snapshot files for $compFolder in $($compDir.FullName)"
             continue
@@ -2329,13 +2359,13 @@ function Backfill-HistoryMonths {
                 $snap = Get-Content -Path $file.FullName -Raw | ConvertFrom-Json
                 $compName = $snap.Computer
                 foreach ($sw in $snap.Software) {
-                    $key = ($sw.Name -replace '\s+', ' ').Trim().ToLower()
+                    $key = Normalize-SoftwareName $sw.Name
                     if (-not $allSoftware.ContainsKey($key) -or $sw.Version -ne 'Unknown') {
                         $allSoftware[$key] = $sw
                     }
                 }
                 foreach ($up in $snap.Updates) {
-                    $key = ($up.Title -replace '\s+', ' ').Trim().ToLower()
+                    $key = Normalize-SoftwareName $up.Title
                     if (-not $allPatches.ContainsKey($key)) {
                         $allPatches[$key] = $up
                     } else {

@@ -477,6 +477,9 @@ function New-LocalHtmlReport {
     html.theme-auto body tr:hover td { background: #1a2a4e; }
     html.theme-auto body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
+    html.theme-auto body a.back-link { color: #80b0e0; }
+    html.theme-auto body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+    html.theme-auto body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
   html.dark body h1, html.dark body h2, html.dark body h3 { color: #80b0e0; }
@@ -492,6 +495,9 @@ function New-LocalHtmlReport {
   html.dark body tr:hover td { background: #1a2a4e; }
   html.dark body .search-box { background: #16213e; border-color: #2a3a5e; color: #e0e0e0; }
   html.dark body .search-box:focus { border-color: #80b0e0; }
+  html.dark body a.back-link { color: #80b0e0; }
+  html.dark body .theme-toggle { border-color: #80b0e0; color: #80b0e0; }
+  html.dark body .theme-toggle:hover { background: #80b0e0; color: #1a1a2e; }
 </style>
 <script>
 function toggleTheme() {
