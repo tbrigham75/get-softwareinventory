@@ -950,7 +950,7 @@ foreach ($folder in $hostFolders) {
             $reportRelPath = $null
             if ($reportFiles.Count -gt 0) {
                 # Relative path from share root to report
-                $reportRelPath = $reportFiles[0].FullName.Substring($SharePath.Length + 1)
+                $reportRelPath = ($reportFiles[0].FullName.Substring($SharePath.Length + 1)) -replace '\\', '/'
             }
 
             $hostEntries += [PSCustomObject]@{
@@ -1309,7 +1309,7 @@ function sortTable(tableId, col) {
 <input type="text" id="sw-filter" class="search-box" placeholder="Filter software..." onkeyup="filterTable('sw-filter','sw-table')">
 <table id="sw-table"><thead><tr><th onclick="sortTable('sw-table',0)">Hostname</th><th onclick="sortTable('sw-table',1)">Name</th><th onclick="sortTable('sw-table',2)">Version</th><th onclick="sortTable('sw-table',3)">Publisher</th><th onclick="sortTable('sw-table',4)">Install Date</th></tr></thead><tbody>$swRows</tbody></table>
 
-<h2 class="section-title">Windows Updates <span class="badge-update">$totalUp</span></h2>
+<h2 class="section-title">Windows Patches <span class="badge-update">$totalUp</span></h2>
 <input type="text" id="up-filter" class="search-box" placeholder="Filter updates..." onkeyup="filterTable('up-filter','up-table')">
 <table id="up-table"><thead><tr><th onclick="sortTable('up-table',0)">Hostname</th><th onclick="sortTable('up-table',1)">Title</th><th onclick="sortTable('up-table',2)">Install Date</th></tr></thead><tbody>$upRows</tbody></table>
 </body></html>

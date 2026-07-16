@@ -556,7 +556,7 @@ function Compare-Snapshots {
     $prevSw = $PreviousSnapshot.Software | ForEach-Object {
         [PSCustomObject]@{
             Name        = $_.Name
-            Normalized  = ($_.Name -replace '\s+', ' ').Trim().ToLower()
+            Normalized  = Normalize-SoftwareName $_.Name
             Version     = $_.Version
         }
     }
@@ -564,7 +564,7 @@ function Compare-Snapshots {
     $currSw = $CurrentSoftware | ForEach-Object {
         [PSCustomObject]@{
             Name        = $_.Name
-            Normalized  = ($_.Name -replace '\s+', ' ').Trim().ToLower()
+            Normalized  = Normalize-SoftwareName $_.Name
             Version     = $_.Version
             Publisher   = $_.Publisher
             InstallDate = $_.InstallDate
@@ -579,14 +579,14 @@ function Compare-Snapshots {
 
     # Updates comparison
     $prevUpTitles = $PreviousSnapshot.Updates | ForEach-Object {
-        ($_.Title -replace '\s+', ' ').Trim()
+        ($_.Title -replace '\s+', ' ').Trim().ToLower()
     }
     $currUpTitles = $CurrentUpdates | ForEach-Object {
-        ($_.Title -replace '\s+', ' ').Trim()
+        ($_.Title -replace '\s+', ' ').Trim().ToLower()
     }
 
     $newUp = @($CurrentUpdates | Where-Object {
-        ($_.Title -replace '\s+', ' ').Trim() -notin $prevUpTitles
+        ($_.Title -replace '\s+', ' ').Trim().ToLower() -notin $prevUpTitles
     })
 
     @{
@@ -790,8 +790,8 @@ function sortTable(tableId, col) {
 <h1>Software Inventory Report</h1>
 <div class="summary">
   <div class="summary-grid">
-    <div class="summary-item"><div class="number"><a href="../../../../all-software.html" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
-    <div class="summary-item"><div class="number"><a href="../../../../all-software.html" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
+    <div class="summary-item"><div class="number"><a href="#allSw-table" style="color:inherit;text-decoration:none">$totalSw</a></div><div class="label">3rd Party Software</div></div>
+    <div class="summary-item"><div class="number"><a href="#allUp-table" style="color:inherit;text-decoration:none">$totalUp</a></div><div class="label">Windows Patches</div></div>
   </div>
   <div class="meta">Computer: <strong>$(ConvertTo-HtmlEncoded $Computer)</strong> &nbsp;|&nbsp; Generated: $reportDate &nbsp;|&nbsp; Previous snapshot: $prevDate &nbsp;|&nbsp; <a href="../../../../years/$year/$month/index.html">Combined Month View</a></div>
 </div>
@@ -1283,6 +1283,7 @@ function New-AllSoftwareHtml {
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
   h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 8px; }
+  h2 { color: #1a3a5c; }
   .summary { background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 20px; }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 10px; margin-bottom: 15px; }
   .summary-item { background: #e8f0fe; padding: 10px; border-radius: 4px; text-align: center; }
@@ -1305,10 +1306,11 @@ function New-AllSoftwareHtml {
   .theme-toggle:hover { background: #1a3a5c; color: #fff; }
   @media (prefers-color-scheme: dark) {
     html.theme-auto body { background: #1a1a2e; color: #e0e0e0; }
-    html.theme-auto body h1 { color: #80b0e0; }
+    html.theme-auto body h1, html.theme-auto body h2 { color: #80b0e0; }
     html.theme-auto body .summary { background: #16213e; }
     html.theme-auto body .summary-item { background: #0f3460; }
     html.theme-auto body .summary-item .number { color: #80b0e0; }
+    html.theme-auto body .summary-item .label { color: #aab; }
     html.theme-auto body table { background: #16213e; }
     html.theme-auto body th { background: #0f3460; }
     html.theme-auto body td { border-bottom: 1px solid #2a2a4e; }
@@ -1318,10 +1320,11 @@ function New-AllSoftwareHtml {
     html.theme-auto body .search-box:focus { border-color: #80b0e0; }
   }
   html.dark body { background: #1a1a2e; color: #e0e0e0; }
-  html.dark body h1 { color: #80b0e0; }
+  html.dark body h1, html.dark body h2 { color: #80b0e0; }
   html.dark body .summary { background: #16213e; }
   html.dark body .summary-item { background: #0f3460; }
   html.dark body .summary-item .number { color: #80b0e0; }
+  html.dark body .summary-item .label { color: #aab; }
   html.dark body table { background: #16213e; }
   html.dark body th { background: #0f3460; }
   html.dark body td { border-bottom: 1px solid #2a2a4e; }
@@ -1740,7 +1743,7 @@ function New-WebsiteIndexHtml {
     $navHtml = ''
     $sortedYears = $years.Keys | Sort-Object -Descending
     foreach ($y in $sortedYears) {
-        $navHtml += "<div class='year-group'><h2 class='year-heading'><a href='#year-$y'>$y</a></h2><div class='month-list'>`n"
+        $navHtml += "<div class='year-group' id='year-$y'><h2 class='year-heading'><a href='#year-$y'>$y</a></h2><div class='month-list'>`n"
         $sortedMonths = $years[$y].Keys | Sort-Object
         foreach ($m in $sortedMonths) {
             $monthName = switch ($m) {
