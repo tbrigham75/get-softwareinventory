@@ -673,6 +673,21 @@ try {
 }
 
 # ---------------------------------------------------------------
+# Step 3a — Cross-list dedup: remove updates already in software
+# ---------------------------------------------------------------
+if ($software.Count -gt 0 -and $updates.Count -gt 0) {
+    $swNames = @($software | ForEach-Object { Normalize-SoftwareName $_.Name } | Where-Object { $_ })
+    if ($swNames.Count -gt 0) {
+        $beforeCount = $updates.Count
+        $updates = @($updates | Where-Object { (Normalize-SoftwareName $_.Title) -notin $swNames })
+        $removed = $beforeCount - $updates.Count
+        if ($removed -gt 0) {
+            Write-Host "  Cross-list dedup: removed $removed update(s) already in software list."
+        }
+    }
+}
+
+# ---------------------------------------------------------------
 # Step 4 — Save JSON snapshot to share
 # ---------------------------------------------------------------
 Write-Host "Saving snapshot..."

@@ -2496,6 +2496,15 @@ foreach ($computer in $localHosts) {
         Write-Warning "    Update query failed for $computer : $_"
         $failures += [PSCustomObject]@{ Computer = $computer; Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; Errors = "Update collection failed: $_" }
     }
+    if ($sw.Count -gt 0 -and $up.Count -gt 0) {
+        $swNames = @($sw | ForEach-Object { Normalize-SoftwareName $_.Name } | Where-Object { $_ })
+        if ($swNames.Count -gt 0) {
+            $beforeCount = $up.Count
+            $up = @($up | Where-Object { (Normalize-SoftwareName $_.Title) -notin $swNames })
+            $removed = $beforeCount - $up.Count
+            if ($removed -gt 0) { Write-Host "    Cross-list dedup: removed $removed update(s) already in software list." }
+        }
+    }
     $allResults += [PSCustomObject]@{ Computer = $computer; Software = $sw; Updates = $up }
 }
 
@@ -2521,11 +2530,18 @@ $(${function:Merge-SoftwareDuplicates})
 function Merge-UpdateDuplicates {
 $(${function:Merge-UpdateDuplicates})
 }
+function Normalize-SoftwareName {
+$(${function:Normalize-SoftwareName})
+}
 `$sw = @(); `$up = @(); `$errMsg = @()
 try { `$sw = Get-LocalSoftware } catch { Write-Warning "Remote software collection failed on `$env:COMPUTERNAME`: $_"; `$errMsg += "Software: $_" }
 try { `$up = Get-LocalUpdates } catch { Write-Warning "Remote update collection failed on `$env:COMPUTERNAME`: $_"; `$errMsg += "Updates: $_" }
 if (`$up) { `$up = Merge-UpdateDuplicates `$up }
-@{ Software = `$sw; Updates = `$up; Error = ($errMsg -join '; ') }
+if (`$sw.Count -gt 0 -and `$up.Count -gt 0) {
+    `$swNames = @(`$sw | ForEach-Object { Normalize-SoftwareName `$_.Name } | Where-Object { `$_.Trim().Length -gt 0 })
+    if (`$swNames.Count -gt 0) { `$up = @(`$up | Where-Object { (Normalize-SoftwareName `$_.Title) -notin `$swNames }) }
+}
+@{ Software = `$sw; Updates = `$up; Error = (`$errMsg -join '; ') }
 "@)
 
     $remoteResults = Invoke-Command -ComputerName $healthyRemote -ScriptBlock $remoteScriptBlock `
